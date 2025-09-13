@@ -1,5 +1,5 @@
 # Multi-stage build for Spring Boot application
-FROM openjdk:21-jdk-slim AS builder
+FROM eclipse-temurin:21-jdk AS builder
 
 # Set working directory
 WORKDIR /app
@@ -18,7 +18,7 @@ COPY src src
 RUN ./gradlew clean build -x test
 
 # Production stage
-FROM openjdk:21-jre-slim
+FROM eclipse-temurin:21-jre
 
 # Create app user
 RUN addgroup --system app && adduser --system --group app

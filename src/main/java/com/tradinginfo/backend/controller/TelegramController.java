@@ -68,12 +68,12 @@ public class TelegramController {
         log.info("📱 Checking subscription for user: {}", userId);
 
         return telegramBotService.checkChannelSubscription(userId)
-                .map(isSubscribed -> ResponseEntity.ok(Map.of(
+                .map(isSubscribed -> ResponseEntity.ok(Map.<String, Object>of(
                         "userId", userId,
                         "subscribed", isSubscribed,
                         "channelId", "@DailyTradiBlog"
                 )))
-                .onErrorReturn(ResponseEntity.ok(Map.of(
+                .onErrorReturn(ResponseEntity.ok(Map.<String, Object>of(
                         "userId", userId,
                         "subscribed", false,
                         "error", "Could not check subscription"

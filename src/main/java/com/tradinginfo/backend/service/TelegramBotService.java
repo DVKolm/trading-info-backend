@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.core.ParameterizedTypeReference;
 import reactor.core.publisher.Mono;
 
 import java.util.HashMap;
@@ -137,7 +138,7 @@ public class TelegramBotService {
         return webClient.post()
                 .uri(TELEGRAM_API_URL + botToken + "/getMe")
                 .retrieve()
-                .bodyToMono(Map.class)
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .doOnSuccess(response -> {
                     log.debug("Bot info retrieved: {}", response);
                 })
