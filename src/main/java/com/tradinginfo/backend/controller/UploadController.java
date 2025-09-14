@@ -73,40 +73,6 @@ public class UploadController {
         return ResponseEntity.ok(result);
     }
 
-    @DeleteMapping("/lesson")
-    public ResponseEntity<Map<String, String>> deleteSingleLesson(
-            @RequestBody Map<String, String> request) {
-
-        String initData = request.get("initData");
-        String lessonPath = request.get("lessonPath");
-
-        log.info("🗑️ Deleting single lesson: {}", lessonPath);
-
-        // Extract telegram user ID from initData
-        Long telegramId = telegramAuthService.extractTelegramUserId(initData);
-
-        // Validate initData and check admin permissions
-        if (!telegramAuthService.validateInitData(initData)) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
-        }
-
-        if (!telegramAuthService.isAdmin(telegramId)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
-        }
-
-        try {
-            uploadService.deleteSingleLesson(lessonPath, telegramId);
-
-            // Clear lesson cache after successful deletion
-            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
-
-            return ResponseEntity.ok(Map.of("message", "Lesson deleted successfully"));
-        } catch (Exception e) {
-            log.error("Error deleting lesson: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(Map.of("error", "Failed to delete lesson: " + e.getMessage()));
-        }
-    }
-
     @GetMapping("/file-tree")
     public ResponseEntity<Map<String, Object>> getFileTree(
             @RequestHeader("X-Telegram-User-Id") Long telegramId) {
@@ -159,6 +125,62 @@ public class UploadController {
 
     @PostMapping("/clear-cache")
     public ResponseEntity<Map<String, String>> clearCache(
+            @RequestBody Map<String, String> request) {
+
+        String initData = request.get("initData");
+        log.info("🧹 Clearing lesson cache");
+        Long telegramId = telegramAuthService.extractTelegramUserId(initData);
+
+        // Validate admin permissions
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        // Clear Redis cache
+        if (redisCacheService.isPresent()) {
+            redisCacheService.get().clearAllCache();
+            return ResponseEntity.ok(Map.of("message", "Cache cleared successfully"));
+        } else {
+            return ResponseEntity.ok(Map.of("message", "Redis not available, no cache to clear"));
+        }
+    }
+
+    @PostMapping("/delete-lesson")
+    public ResponseEntity<Map<String, String>> deleteSingleLesson(
+            @RequestBody Map<String, String> request) {
+
+        String initData = request.get("initData");
+        String lessonPath = request.get("lessonPath");
+
+        log.info("🗑️ Deleting single lesson: {}", lessonPath);
+
+        // Extract telegram user ID from initData
+        Long telegramId = telegramAuthService.extractTelegramUserId(initData);
+
+        // Validate initData and check admin permissions
+        if (!telegramAuthService.validateInitData(initData)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
+        }
+
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        try {
+            uploadService.deleteSingleLesson(lessonPath, telegramId);
+
+            // Clear lesson cache after successful deletion
+            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+
+            return ResponseEntity.ok(Map.of("message", "Lesson deleted successfully"));
+        } catch (Exception e) {
+            log.error("Error deleting lesson: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to delete lesson: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/legacy-clear-cache")
+    public ResponseEntity<Map<String, String>> legacyClearCache(
             @RequestParam("initData") String initData) {
 
         log.info("🧹 Clearing lesson cache");

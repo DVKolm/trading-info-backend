@@ -12,12 +12,23 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
@@ -39,9 +50,9 @@ public class UploadService {
     private final HtmlRenderer renderer = HtmlRenderer.builder().build();
 
     public Map<String, Object> uploadLessons(MultipartFile file, String targetFolder, Long telegramId) {
-        Map<String, Object> result = new HashMap<>();
-        List<String> uploadedFiles = new ArrayList<>();
-        List<String> errors = new ArrayList<>();
+        Map<String, Object> result = new HashMap<String, Object>();
+        List<String> uploadedFiles = new ArrayList<String>();
+        List<String> errors = new ArrayList<String>();
 
         try {
             Path tempDir = Files.createTempDirectory("upload_");
@@ -50,20 +61,7 @@ public class UploadService {
             Files.walk(tempDir)
                     .filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".md"))
-                    .forEach(mdFile -> {
-                        try {
-                            String content = Files.readString(mdFile, StandardCharsets.UTF_8);
-                            String fileName = mdFile.getFileName().toString();
-                            String lessonPath = targetFolder + "/" + fileName;
-
-                            saveLessonToDatabase(lessonPath, content, targetFolder);
-                            uploadedFiles.add(fileName);
-                            log.info("✅ Uploaded lesson: {}", fileName);
-                        } catch (Exception e) {
-                            log.error("❌ Failed to process file: {}", mdFile.getFileName(), e);
-                            errors.add(mdFile.getFileName().toString() + ": " + e.getMessage());
-                        }
-                    });
+                    .forEach(mdFile -> processMarkdownFile(mdFile, targetFolder, uploadedFiles, errors));
 
             deleteDirectory(tempDir);
 
@@ -74,26 +72,16 @@ public class UploadService {
                 result.put("errors", errors);
             }
 
-            // Send Telegram notification for successful upload
-            if (!uploadedFiles.isEmpty() && telegramBotService.isPresent()) {
-                try {
-                    String message = String.format("📚 *Новые уроки загружены!*\n\n" +
-                            "Папка: `%s`\n" +
-                            "Количество файлов: %d\n" +
-                            "Файлы: %s",
-                            targetFolder, uploadedFiles.size(), String.join(", ", uploadedFiles));
+            sendTelegramNotificationForUpload(targetFolder, uploadedFiles);
 
-                    telegramBotService.get().sendMessageToChannel(message, "Markdown");
-                    log.info("✅ Telegram notification sent for uploaded lessons");
-                } catch (Exception e) {
-                    log.warn("⚠️ Failed to send Telegram notification", e);
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("❌ Upload failed", e);
+        } catch (IOException e) {
+            log.error("Upload failed due to IO error", e);
             result.put("success", false);
-            result.put("error", e.getMessage());
+            result.put("error", "File processing error: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Upload failed unexpectedly", e);
+            result.put("success", false);
+            result.put("error", "Unexpected error occurred");
         }
 
         return result;
@@ -184,8 +172,8 @@ public class UploadService {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(content.getBytes(StandardCharsets.UTF_8));
             return bytesToHex(hash);
-        } catch (Exception e) {
-            log.error("Failed to calculate hash", e);
+        } catch (NoSuchAlgorithmException e) {
+            log.error("SHA-256 algorithm not available", e);
             return "";
         }
     }
@@ -220,46 +208,44 @@ public class UploadService {
     }
 
     public Map<String, Object> uploadSingleLesson(MultipartFile file, String targetFolder, Long telegramId) {
-        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> result = new HashMap<String, Object>();
 
         try {
-            if (!file.getOriginalFilename().endsWith(".md")) {
+            String originalFilename = Optional.ofNullable(file.getOriginalFilename())
+                    .orElseThrow(() -> new IllegalArgumentException("File name is required"));
+
+            if (!originalFilename.endsWith(".md")) {
                 result.put("success", false);
                 result.put("error", "Only Markdown (.md) files are allowed");
                 return result;
             }
 
             String content = new String(file.getBytes(), StandardCharsets.UTF_8);
-            String fileName = file.getOriginalFilename();
-            String lessonPath = (targetFolder != null ? targetFolder + "/" : "") + fileName;
+            String lessonPath = Optional.ofNullable(targetFolder)
+                    .map(folder -> folder + "/" + originalFilename)
+                    .orElse(originalFilename);
 
             saveLessonToDatabase(lessonPath, content, targetFolder);
 
             result.put("success", true);
-            result.put("message", "Lesson uploaded successfully: " + fileName);
-            result.put("fileName", fileName);
+            result.put("message", "Lesson uploaded successfully: " + originalFilename);
+            result.put("fileName", originalFilename);
 
-            log.info("✅ Uploaded single lesson: {}", fileName);
+            log.info("Uploaded single lesson: {}", originalFilename);
+            sendTelegramNotificationForSingleLessonUpload(originalFilename, targetFolder);
 
-            // Send Telegram notification for single lesson upload
-            if (telegramBotService.isPresent()) {
-                try {
-                    String message = String.format("📝 *Новый урок загружен!*\n\n" +
-                            "Файл: `%s`\n" +
-                            "Папка: `%s`",
-                            fileName, targetFolder != null ? targetFolder : "Корень");
-
-                    telegramBotService.get().sendMessageToChannel(message, "Markdown");
-                    log.info("✅ Telegram notification sent for single lesson upload");
-                } catch (Exception e) {
-                    log.warn("⚠️ Failed to send Telegram notification", e);
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("❌ Failed to upload single lesson", e);
+        } catch (IOException e) {
+            log.error("Failed to upload single lesson due to IO error", e);
+            result.put("success", false);
+            result.put("error", "File processing error");
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid file upload request", e);
             result.put("success", false);
             result.put("error", e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error during single lesson upload", e);
+            result.put("success", false);
+            result.put("error", "Unexpected error occurred");
         }
 
         return result;
@@ -267,47 +253,167 @@ public class UploadService {
 
     public void deleteLessonsFolder(String folder, Long telegramId) {
         List<Lesson> lessons = lessonRepository.findByParentFolder(folder);
+
+        deletePhysicalFolderSafely(folder);
         lessonRepository.deleteAll(lessons);
-        log.info("✅ Deleted {} lessons from folder: {}", lessons.size(), folder);
+        log.info("Deleted {} lessons from folder: {}", lessons.size(), folder);
 
-        // Send Telegram notification for folder deletion
-        if (telegramBotService.isPresent() && !lessons.isEmpty()) {
-            try {
-                String message = String.format("🗑️ *Папка с уроками удалена*\n\n" +
-                        "Папка: `%s`\n" +
-                        "Удалено уроков: %d",
-                        folder, lessons.size());
-
-                telegramBotService.get().sendMessageToChannel(message, "Markdown");
-                log.info("✅ Telegram notification sent for folder deletion");
-            } catch (Exception e) {
-                log.warn("⚠️ Failed to send Telegram notification", e);
-            }
-        }
+        sendTelegramNotificationForFolderDeletion(folder, lessons.size());
     }
 
     public void deleteSingleLesson(String lessonPath, Long telegramId) {
         Lesson lesson = lessonRepository.findByPath(lessonPath)
                 .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + lessonPath));
 
+        deletePhysicalFileSafely(lessonPath);
         lessonRepository.delete(lesson);
-        log.info("✅ Deleted single lesson: {}", lessonPath);
+        log.info("Deleted single lesson: {}", lessonPath);
 
-        // Send Telegram notification for lesson deletion
-        if (telegramBotService.isPresent()) {
-            try {
-                String message = String.format("🗑️ *Урок удален*\n\n" +
-                        "Файл: `%s`\n" +
-                        "Название: `%s`",
-                        lessonPath, lesson.getTitle());
+        sendTelegramNotificationForLessonDeletion(lessonPath, lesson.getTitle());
+    }
 
-                telegramBotService.get().sendMessageToChannel(message, "Markdown");
-                log.info("✅ Telegram notification sent for lesson deletion");
-            } catch (Exception e) {
-                log.warn("⚠️ Failed to send Telegram notification", e);
-            }
+    private void processMarkdownFile(Path mdFile, String targetFolder,
+                                     List<String> uploadedFiles, List<String> errors) {
+        try {
+            String content = Files.readString(mdFile, StandardCharsets.UTF_8);
+            String fileName = mdFile.getFileName().toString();
+            String lessonPath = targetFolder + "/" + fileName;
+
+            saveLessonToDatabase(lessonPath, content, targetFolder);
+            uploadedFiles.add(fileName);
+            log.info("Uploaded lesson: {}", fileName);
+        } catch (Exception e) {
+            log.error("Failed to process file: {}", mdFile.getFileName(), e);
+            errors.add(mdFile.getFileName().toString() + ": " + e.getMessage());
         }
     }
+
+    private void sendTelegramNotificationForUpload(String targetFolder, List<String> uploadedFiles) {
+        if (uploadedFiles.isEmpty() || telegramBotService.isEmpty()) {
+            return;
+        }
+
+        try {
+            String message = String.format("""
+                📚 *Новые уроки загружены!*
+
+                Папка: `%s`
+                Количество файлов: %d
+                Файлы: %s
+                """, targetFolder, uploadedFiles.size(), String.join(", ", uploadedFiles));
+
+            telegramBotService.get().sendMessageToChannel(message, "Markdown");
+            log.info("Telegram notification sent for uploaded lessons");
+        } catch (Exception e) {
+            log.warn("Failed to send Telegram notification for upload", e);
+        }
+    }
+
+    private void sendTelegramNotificationForFolderDeletion(String folder, int lessonsCount) {
+        if (lessonsCount == 0 || telegramBotService.isEmpty()) {
+            return;
+        }
+
+        try {
+            String message = String.format("""
+                🗑️ *Папка с уроками удалена*
+
+                Папка: `%s`
+                Удалено уроков: %d
+                """, folder, lessonsCount);
+
+            telegramBotService.get().sendMessageToChannel(message, "Markdown");
+            log.info("Telegram notification sent for folder deletion");
+        } catch (Exception e) {
+            log.warn("Failed to send Telegram notification for folder deletion", e);
+        }
+    }
+
+    private void sendTelegramNotificationForLessonDeletion(String lessonPath, String lessonTitle) {
+        telegramBotService.ifPresent(botService -> {
+            try {
+                String message = String.format("""
+                    🗑️ *Урок удален*
+
+                    Файл: `%s`
+                    Название: `%s`
+                    """, lessonPath, lessonTitle);
+
+                botService.sendMessageToChannel(message, "Markdown");
+                log.info("Telegram notification sent for single lesson deletion");
+            } catch (Exception e) {
+                log.warn("Failed to send Telegram notification for lesson deletion", e);
+            }
+        });
+    }
+
+    private void sendTelegramNotificationForSingleLessonUpload(String fileName, String targetFolder) {
+        telegramBotService.ifPresent(botService -> {
+            try {
+                String folderName = Optional.ofNullable(targetFolder).orElse("Корень");
+                String message = String.format("""
+                    📝 *Новый урок загружен!*
+
+                    Файл: `%s`
+                    Папка: `%s`
+                    """, fileName, folderName);
+
+                botService.sendMessageToChannel(message, "Markdown");
+                log.info("Telegram notification sent for single lesson upload");
+            } catch (Exception e) {
+                log.warn("Failed to send Telegram notification for single lesson upload", e);
+            }
+        });
+    }
+
+    private void deletePhysicalFolderSafely(String folderPath) {
+        try {
+            deletePhysicalFolder(folderPath);
+        } catch (IOException e) {
+            log.warn("Failed to delete physical folder: {}", folderPath, e);
+        }
+    }
+
+    private void deletePhysicalFileSafely(String lessonPath) {
+        try {
+            deletePhysicalFile(lessonPath);
+        } catch (IOException e) {
+            log.warn("Failed to delete physical file: {}", lessonPath, e);
+        }
+    }
+
+    private void deletePhysicalFile(String lessonPath) throws IOException {
+        Path filePath = Paths.get(uploadPath, lessonPath);
+        if (Files.exists(filePath)) {
+            Files.delete(filePath);
+            log.info("🗑️ Deleted physical file: {}", filePath);
+        } else {
+            log.warn("⚠️ Physical file not found: {}", filePath);
+        }
+
+        // Also try to delete the file from the project root (in case it's stored there)
+        Path rootFilePath = Paths.get(lessonPath);
+        if (Files.exists(rootFilePath)) {
+            Files.delete(rootFilePath);
+            log.info("🗑️ Deleted physical file from root: {}", rootFilePath);
+        }
+    }
+
+    private void deletePhysicalFolder(String folderPath) throws IOException {
+        Path uploadFolderPath = Paths.get(uploadPath, folderPath);
+        if (Files.exists(uploadFolderPath)) {
+            deleteDirectory(uploadFolderPath);
+            log.info("🗑️ Deleted physical folder: {}", uploadFolderPath);
+        }
+
+        // Also try to delete the folder from the project root
+        Path rootFolderPath = Paths.get(folderPath);
+        if (Files.exists(rootFolderPath)) {
+            deleteDirectory(rootFolderPath);
+            log.info("🗑️ Deleted physical folder from root: {}", rootFolderPath);
+        }
+    }
+
 
     public void createFolder(String folderName, Long telegramId) {
         if (folderName == null || folderName.trim().isEmpty()) {

@@ -3,13 +3,17 @@ package com.tradinginfo.backend.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.core.ParameterizedTypeReference;
 import reactor.core.publisher.Mono;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -27,97 +31,35 @@ public class TelegramBotService {
             .build();
 
     private static final String TELEGRAM_API_URL = "https://api.telegram.org/bot";
+    private static final Set<Long> ADMIN_USER_IDS = Set.of(781182099L, 5974666109L);
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
 
-    /**
-     * Send message to Telegram channel
-     */
     public void sendMessageToChannel(String message) {
         sendMessageToChannel(message, null);
     }
 
-    /**
-     * Send message to Telegram channel with parse mode
-     */
     public void sendMessageToChannel(String message, String parseMode) {
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("chat_id", channelId);
-            payload.put("text", message);
-            if (parseMode != null) {
-                payload.put("parse_mode", parseMode);
-            }
-
-            webClient.post()
-                    .uri(TELEGRAM_API_URL + botToken + "/sendMessage")
-                    .bodyValue(payload)
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .doOnSuccess(response -> {
-                        log.info("📱 Message sent to Telegram channel: {}", channelId);
-                        log.debug("Telegram API response: {}", response);
-                    })
-                    .doOnError(error -> {
-                        log.error("❌ Failed to send message to Telegram channel: {}", error.getMessage());
-                    })
-                    .subscribe();
-
+            Map<String, Object> payload = createMessagePayload(channelId, message, parseMode);
+            sendTelegramMessage(payload, "channel " + channelId);
         } catch (Exception e) {
-            log.error("❌ Error sending Telegram message", e);
+            log.error("Error sending Telegram message to channel", e);
         }
     }
 
-    /**
-     * Send direct message to user
-     */
     public void sendMessageToUser(Long userId, String message) {
         sendMessageToUser(userId, message, null);
     }
 
-    /**
-     * Send direct message to user with parse mode
-     */
     public void sendMessageToUser(Long userId, String message, String parseMode) {
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("chat_id", userId);
-            payload.put("text", message);
-            if (parseMode != null) {
-                payload.put("parse_mode", parseMode);
-            }
-
-            webClient.post()
-                    .uri(TELEGRAM_API_URL + botToken + "/sendMessage")
-                    .bodyValue(payload)
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .doOnSuccess(response -> {
-                        log.info("📱 Message sent to Telegram user: {}", userId);
-                    })
-                    .doOnError(error -> {
-                        log.warn("⚠️ Failed to send message to user {}: {}", userId, error.getMessage());
-                    })
-                    .subscribe();
-
+            Map<String, Object> payload = createMessagePayload(userId.toString(), message, parseMode);
+            sendTelegramMessage(payload, "user " + userId);
         } catch (Exception e) {
-            log.error("❌ Error sending Telegram message to user {}", userId, e);
+            log.error("Error sending Telegram message to user {}", userId, e);
         }
     }
 
-    /**
-     * Check if user is subscribed to channel (synchronous)
-     */
-    public boolean checkChannelMembership(Long userId) {
-        try {
-            return checkChannelSubscription(userId).block();
-        } catch (Exception e) {
-            log.warn("Failed to check channel membership for user {}: {}", userId, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Check if user is subscribed to channel
-     */
     public Mono<Boolean> checkChannelSubscription(Long userId) {
         return webClient.post()
                 .uri(TELEGRAM_API_URL + botToken + "/getChatMember")
@@ -127,19 +69,9 @@ public class TelegramBotService {
                 ))
                 .retrieve()
                 .bodyToMono(Map.class)
-                .map(response -> {
-                    Map<String, Object> result = (Map<String, Object>) response.get("result");
-                    if (result != null) {
-                        String status = (String) result.get("status");
-                        boolean isSubscribed = !"left".equals(status) && !"kicked".equals(status);
-                        log.debug("User {} subscription status: {} (subscribed: {})", userId, status, isSubscribed);
-                        return isSubscribed;
-                    }
-                    return false;
-                })
-                .doOnError(error -> {
-                    log.warn("⚠️ Failed to check subscription for user {}: {}", userId, error.getMessage());
-                })
+                .map(this::extractSubscriptionStatus)
+                .doOnError(error ->
+                        log.warn("Failed to check subscription for user {}: {}", userId, error.getMessage()))
                 .onErrorReturn(false);
     }
 
@@ -242,5 +174,130 @@ public class TelegramBotService {
     public String getChannelInfo() {
         return String.format("Channel: %s | Bot configured: %s",
                 channelId, isBotConfigured());
+    }
+
+    private Map<String, Object> createMessagePayload(String chatId, String message, String parseMode) {
+        Map<String, Object> payload = new HashMap<String, Object>();
+        payload.put("chat_id", chatId);
+        payload.put("text", message);
+        Optional.ofNullable(parseMode).ifPresent(mode -> payload.put("parse_mode", mode));
+        return payload;
+    }
+
+    private void sendTelegramMessage(Map<String, Object> payload, String target) {
+        webClient.post()
+                .uri(TELEGRAM_API_URL + botToken + "/sendMessage")
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .doOnSuccess(response -> log.info("Message sent to Telegram {}", target))
+                .doOnError(error -> log.error("Failed to send message to {}: {}", target, error.getMessage()))
+                .subscribe();
+    }
+
+    /**
+     * Get bot configuration status for API endpoints
+     */
+    public Map<String, Object> getBotConfigurationStatus() {
+        if (!isBotConfigured()) {
+            return Map.<String, Object>of(
+                    "configured", false,
+                    "message", "Bot token not configured"
+            );
+        }
+
+        return Map.<String, Object>of(
+                "configured", true,
+                "channel", getChannelInfo()
+        );
+    }
+
+    /**
+     * Process lesson notification with validation
+     */
+    public Map<String, String> processLessonNotification(String lessonTitle, String lessonPath) {
+        return Optional.ofNullable(lessonTitle)
+                .filter(title -> !title.trim().isEmpty())
+                .map(title -> {
+                    notifyNewLesson(title, lessonPath);
+                    return Map.of(
+                            "message", "Notification sent to channel",
+                            "lessonTitle", title
+                    );
+                })
+                .orElse(Map.of("error", "Lesson title is required"));
+    }
+
+    /**
+     * Process lesson completion notification with validation
+     */
+    public Map<String, String> processLessonCompletionNotification(long userId, String lessonTitle) {
+        return Optional.ofNullable(lessonTitle)
+                .filter(title -> !title.trim().isEmpty())
+                .map(title -> {
+                    notifyLessonCompletion(userId, title);
+                    return Map.of(
+                            "message", "Completion notification sent",
+                            "userId", String.valueOf(userId)
+                    );
+                })
+                .orElse(Map.of("error", "Lesson title is required"));
+    }
+
+    /**
+     * Create subscription check response
+     */
+    public Map<String, Object> createSubscriptionCheckResponse(Long userId, boolean subscribed, String error) {
+        if (error != null) {
+            return Map.<String, Object>of(
+                    "userId", userId,
+                    "subscribed", subscribed,
+                    "channelId", "@DailyTradiBlog",
+                    "error", error
+            );
+        }
+
+        return Map.<String, Object>of(
+                "userId", userId,
+                "subscribed", subscribed,
+                "channelId", "@DailyTradiBlog"
+        );
+    }
+
+    /**
+     * Process message sending with target routing
+     */
+    public Map<String, String> processMessageSending(String message, String target) {
+        return Optional.ofNullable(message)
+                .filter(msg -> !msg.trim().isEmpty())
+                .map(msg -> sendMessageToTarget(msg, target))
+                .orElse(Map.of("error", "Message is required"));
+    }
+
+    /**
+     * Send message to target with validation and routing
+     */
+    private Map<String, String> sendMessageToTarget(String message, String target) {
+        if ("channel".equals(target)) {
+            sendMessageToChannel(message);
+            return Map.of("message", "Message sent to channel");
+        }
+
+        try {
+            Long userId = Long.parseLong(target);
+            sendMessageToUser(userId, message);
+            return Map.of("message", "Message sent to user " + userId);
+        } catch (NumberFormatException e) {
+            return Map.of("error", "Invalid target");
+        }
+    }
+
+    private boolean extractSubscriptionStatus(Map<String, Object> response) {
+        return Optional.ofNullable(response.get("result"))
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(result -> (String) result.get("status"))
+                .map(status -> !"left".equals(status) && !"kicked".equals(status))
+                .orElse(false);
     }
 }

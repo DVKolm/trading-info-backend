@@ -12,7 +12,10 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
+<<<<<<< HEAD
 import java.util.Map;
+=======
+>>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 import java.util.Optional;
 import java.util.Set;
 
@@ -68,9 +71,15 @@ public class SubscriptionService {
         if (cached.isPresent()) {
             SubscriptionStatusDTO status = cached.get();
             // Check if cache is still valid
+<<<<<<< HEAD
             if (status.verifiedAt() != null) {
                 long minutesSinceVerification = ChronoUnit.MINUTES.between(
                         status.verifiedAt(), LocalDateTime.now()
+=======
+            if (status.getVerifiedAt() != null) {
+                long minutesSinceVerification = ChronoUnit.MINUTES.between(
+                        status.getVerifiedAt(), LocalDateTime.now()
+>>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
                 );
                 if (minutesSinceVerification < SUBSCRIPTION_CACHE_DURATION) {
                     return status;
@@ -217,7 +226,11 @@ public class SubscriptionService {
 
         // Check subscription status
         SubscriptionStatusDTO status = getSubscriptionStatus(telegramId);
+<<<<<<< HEAD
         return status.subscribed();
+=======
+        return status.isSubscribed();
+>>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
     }
 
     /**
