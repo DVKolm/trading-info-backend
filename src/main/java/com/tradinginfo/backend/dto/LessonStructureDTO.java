@@ -1,28 +1,20 @@
 package com.tradinginfo.backend.dto;
 
-import lombok.Data;
-import lombok.Builder;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
 import java.util.List;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class LessonStructureDTO {
-    private String name;
-    private String path;
-    private List<LessonItemDTO> lessons;
+public record LessonStructureDTO(
+        String id,
+        String name,
+        String type,
+        String path,
+        String filename,
+        List<LessonStructureDTO> children) {
 
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class LessonItemDTO {
-        private String title;
-        private String path;
-        private Integer lessonNumber;
-        private Integer wordCount;
+    public static LessonStructureDTO createFolder(String id, String name, String path, List<LessonStructureDTO> children) {
+        return new LessonStructureDTO(id, name, "folder", path, null, children);
+    }
+
+    public static LessonStructureDTO createFile(String id, String name, String path, String filename) {
+        return new LessonStructureDTO(id, name, "file", path, filename, null);
     }
 }

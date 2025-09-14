@@ -1,62 +1,87 @@
 package com.tradinginfo.backend.controller;
 
-import com.tradinginfo.backend.service.TelegramBotService;
-import com.tradinginfo.backend.service.TelegramAuthService;
+import com.tradinginfo.backend.dto.SubscriptionStatusDTO;
+import com.tradinginfo.backend.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import reactor.core.publisher.Mono;
+
 import java.util.Map;
 
 @RestController
-@RequestMapping("/subscription")
+@RequestMapping("/api/subscription")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin
+@CrossOrigin(origins = "*")
 public class SubscriptionController {
 
-    private final TelegramBotService telegramBotService;
-    private final TelegramAuthService telegramAuthService;
+    private final SubscriptionService subscriptionService;
 
-    @GetMapping("/status/{userId}")
-    public Mono<ResponseEntity<Map<String, Object>>> getSubscriptionStatus(@PathVariable Long userId) {
-        log.info("📊 Checking subscription status for user: {}", userId);
+    /**
+     * Check if user has access to a specific lesson
+     */
+    @GetMapping("/access/check")
+    public ResponseEntity<Map<String, Object>> checkLessonAccess(
+            @RequestParam(required = false) Long telegramId,
+            @RequestParam String lessonPath) {
 
-        // Check actual Telegram channel subscription
-        return telegramBotService.checkChannelSubscription(userId)
-                .map(isSubscribed -> {
-                    Map<String, Object> response = Map.of(
-                            "hasSubscription", isSubscribed,
-                            "isPremium", telegramAuthService.isAdmin(userId),
-                            "subscriptionType", isSubscribed ? "premium" : "free",
-                            "validUntil", System.currentTimeMillis() + 86400000L,
-                            "channelId", "@DailyTradiBlog"
-                    );
-                    return ResponseEntity.ok(response);
-                })
-                .onErrorReturn(ResponseEntity.ok(Map.of(
-                        "hasSubscription", false,
-                        "isPremium", false,
-                        "subscriptionType", "free",
-                        "error", "Could not verify subscription"
-                )));
+        var hasAccess = subscriptionService.hasAccessToLesson(telegramId, lessonPath);
+        var isPremium = subscriptionService.isPremiumLesson(lessonPath);
+
+        return ResponseEntity.ok(Map.of(
+            "hasAccess", hasAccess,
+            "isPremiumContent", isPremium,
+            "requiresSubscription", isPremium && !hasAccess
+        ));
     }
 
-    @PostMapping("/verify")
-    public ResponseEntity<Map<String, Object>> verifySubscription(@RequestBody Map<String, Object> request) {
-        String initData = (String) request.get("initData");
-        log.info("✅ Verifying subscription with initData");
+    /**
+     * Get subscription status
+     */
+    @GetMapping("/status/{userId}")
+    public ResponseEntity<SubscriptionStatusDTO> getSubscriptionStatus(@PathVariable Long userId) {
+        log.info("Getting subscription status for user: {}", userId);
+        var status = subscriptionService.getSubscriptionStatus(userId);
+        return ResponseEntity.ok(status);
+    }
 
-        // For now, always return valid subscription
-        // In production, implement proper Telegram subscription verification
-        Map<String, Object> response = Map.of(
-                "valid", true,
-                "hasAccess", true,
-                "subscriptionLevel", "premium",
-                "message", "Subscription verified successfully"
-        );
+    /**
+     * Handle subscription verification callback
+     */
+    @PostMapping("/callback/verified")
+    public ResponseEntity<Void> handleVerificationCallback(
+            @RequestParam Long telegramId,
+            @RequestParam boolean verified) {
 
-        return ResponseEntity.ok(response);
+        subscriptionService.handleSubscriptionVerification(telegramId, verified);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Grant premium access (admin only)
+     */
+    @PostMapping("/admin/grant")
+    public ResponseEntity<Map<String, Object>> grantPremiumAccess(
+            @RequestParam Long telegramId,
+            @RequestParam(defaultValue = "30") int days) {
+
+        subscriptionService.grantPremiumAccess(telegramId, days);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Premium access granted for " + days + " days"
+        ));
+    }
+
+    /**
+     * Revoke premium access (admin only)
+     */
+    @PostMapping("/admin/revoke")
+    public ResponseEntity<Map<String, Object>> revokePremiumAccess(@RequestParam Long telegramId) {
+        subscriptionService.revokePremiumAccess(telegramId);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Premium access revoked"
+        ));
     }
 }

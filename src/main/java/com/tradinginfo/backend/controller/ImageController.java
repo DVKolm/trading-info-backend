@@ -8,10 +8,18 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import java.io.File;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/image")
@@ -26,23 +34,19 @@ public class ImageController {
     @GetMapping("/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {
         try {
-            // Decode the filename
-            String decodedFilename = java.net.URLDecoder.decode(filename, "UTF-8");
+            String decodedFilename = URLDecoder.decode(filename, StandardCharsets.UTF_8);
+            log.info("Serving image: {}", decodedFilename);
 
-            log.info("📷 Serving image: {}", decodedFilename);
-
-            // Look for image in various possible locations
-            Path imagePath = findImagePath(decodedFilename);
+            Path imagePath = findImagePath(decodedFilename)
+                    .orElse(null);
 
             if (imagePath == null || !imagePath.toFile().exists()) {
-                log.warn("❌ Image not found: {}", decodedFilename);
+                log.warn("Image not found: {}", decodedFilename);
                 return ResponseEntity.notFound().build();
             }
 
             FileSystemResource resource = new FileSystemResource(imagePath.toFile());
-
-            // Determine content type based on file extension
-            String contentType = getContentType(decodedFilename);
+            String contentType = determineContentType(decodedFilename);
 
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType))
@@ -50,40 +54,41 @@ public class ImageController {
                     .body(resource);
 
         } catch (Exception e) {
-            log.error("❌ Error serving image: {}", filename, e);
+            log.error("Error serving image: {}", filename, e);
             return ResponseEntity.internalServerError().build();
         }
     }
 
-    private Path findImagePath(String filename) {
-        // Try different possible locations for images
-        String[] possiblePaths = {
+    private Optional<Path> findImagePath(String filename) {
+        java.util.List<String> possiblePaths = Arrays.asList(
                 uploadPath + "/" + filename,
                 "images/" + filename,
                 "lessons/images/" + filename,
                 "static/images/" + filename,
-                filename // Direct path
-        };
+                filename
+        );
 
-        for (String pathStr : possiblePaths) {
-            Path path = Paths.get(pathStr);
-            if (path.toFile().exists()) {
-                return path;
-            }
-        }
-
-        return null;
+        return possiblePaths.stream()
+                .map(Paths::get)
+                .filter(path -> path.toFile().exists())
+                .findFirst();
     }
 
-    private String getContentType(String filename) {
-        String extension = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
+    private String determineContentType(String filename) {
+        int lastDotIndex = filename.lastIndexOf('.');
+        if (lastDotIndex == -1) {
+            return "application/octet-stream";
+        }
 
+        String extension = filename.substring(lastDotIndex + 1).toLowerCase();
         return switch (extension) {
             case "png" -> "image/png";
             case "jpg", "jpeg" -> "image/jpeg";
             case "gif" -> "image/gif";
             case "svg" -> "image/svg+xml";
             case "webp" -> "image/webp";
+            case "bmp" -> "image/bmp";
+            case "ico" -> "image/x-icon";
             default -> "application/octet-stream";
         };
     }

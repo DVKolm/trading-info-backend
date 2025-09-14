@@ -1,13 +1,22 @@
 package com.tradinginfo.backend.controller;
 
-import com.tradinginfo.backend.service.TelegramBotService;
 import com.tradinginfo.backend.service.TelegramAuthService;
+import com.tradinginfo.backend.service.TelegramBotService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
+
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/telegram")
@@ -21,19 +30,9 @@ public class TelegramController {
 
     @GetMapping("/bot/info")
     public ResponseEntity<Map<String, Object>> getBotInfo() {
-        log.info("📱 Getting bot information");
-
-        if (!telegramBotService.isBotConfigured()) {
-            return ResponseEntity.ok(Map.of(
-                    "configured", false,
-                    "message", "Bot token not configured"
-            ));
-        }
-
-        return ResponseEntity.ok(Map.of(
-                "configured", true,
-                "channel", telegramBotService.getChannelInfo()
-        ));
+        log.info("Getting bot information");
+        Map<String, Object> botInfo = telegramBotService.getBotConfigurationStatus();
+        return ResponseEntity.ok(botInfo);
     }
 
     @PostMapping("/notify/lesson")
@@ -43,7 +42,6 @@ public class TelegramController {
 
         Long telegramId = telegramAuthService.extractTelegramUserId(initData);
 
-        // Check admin permissions
         if (!telegramAuthService.isAdmin(telegramId)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
@@ -51,47 +49,35 @@ public class TelegramController {
         String lessonTitle = request.get("title");
         String lessonPath = request.get("path");
 
-        if (lessonTitle == null || lessonTitle.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Lesson title is required"));
+        Map<String, String> result = telegramBotService.processLessonNotification(lessonTitle, lessonPath);
+
+        if (result.containsKey("error")) {
+            return ResponseEntity.badRequest().body(result);
         }
-
-        telegramBotService.notifyNewLesson(lessonTitle, lessonPath);
-
-        return ResponseEntity.ok(Map.of(
-                "message", "Notification sent to channel",
-                "lessonTitle", lessonTitle
-        ));
+        return ResponseEntity.ok(result);
     }
 
     @PostMapping("/check-subscription/{userId}")
     public Mono<ResponseEntity<Map<String, Object>>> checkSubscription(@PathVariable Long userId) {
-        log.info("📱 Checking subscription for user: {}", userId);
+        log.info("Checking subscription for user: {}", userId);
 
         return telegramBotService.checkChannelSubscription(userId)
-                .map(isSubscribed -> ResponseEntity.ok(Map.<String, Object>of(
-                        "userId", userId,
-                        "subscribed", isSubscribed,
-                        "channelId", "@DailyTradiBlog"
-                )))
-                .onErrorReturn(ResponseEntity.ok(Map.<String, Object>of(
-                        "userId", userId,
-                        "subscribed", false,
-                        "error", "Could not check subscription"
-                )));
+                .map(isSubscribed -> ResponseEntity.ok(telegramBotService.createSubscriptionCheckResponse(userId, isSubscribed, null)))
+                .onErrorReturn(ResponseEntity.ok(telegramBotService.createSubscriptionCheckResponse(userId, false, "Could not check subscription")));
     }
 
     @PostMapping("/welcome")
     public ResponseEntity<Map<String, String>> sendWelcomeMessage(
             @RequestBody Map<String, Object> request) {
 
-        Long userId = ((Number) request.get("userId")).longValue();
+        long userId = ((Number) request.get("userId")).longValue();
         String firstName = (String) request.get("firstName");
 
         telegramBotService.sendWelcomeMessage(userId, firstName);
 
         return ResponseEntity.ok(Map.of(
                 "message", "Welcome message sent",
-                "userId", userId.toString()
+                "userId", String.valueOf(userId)
         ));
     }
 
@@ -99,19 +85,15 @@ public class TelegramController {
     public ResponseEntity<Map<String, String>> notifyLessonCompletion(
             @RequestBody Map<String, Object> request) {
 
-        Long userId = ((Number) request.get("userId")).longValue();
+        long userId = ((Number) request.get("userId")).longValue();
         String lessonTitle = (String) request.get("lessonTitle");
 
-        if (lessonTitle == null || lessonTitle.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Lesson title is required"));
+        Map<String, String> result = telegramBotService.processLessonCompletionNotification(userId, lessonTitle);
+
+        if (result.containsKey("error")) {
+            return ResponseEntity.badRequest().body(result);
         }
-
-        telegramBotService.notifyLessonCompletion(userId, lessonTitle);
-
-        return ResponseEntity.ok(Map.of(
-                "message", "Completion notification sent",
-                "userId", userId.toString()
-        ));
+        return ResponseEntity.ok(result);
     }
 
     @PostMapping("/send-message")
@@ -121,29 +103,19 @@ public class TelegramController {
 
         Long telegramId = telegramAuthService.extractTelegramUserId(initData);
 
-        // Check admin permissions
         if (!telegramAuthService.isAdmin(telegramId)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
         String message = request.get("message");
-        String target = request.get("target"); // "channel" or user ID
+        String target = request.get("target");
 
-        if (message == null || message.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Message is required"));
-        }
+        Map<String, String> result = telegramBotService.processMessageSending(message, target);
 
-        if ("channel".equals(target)) {
-            telegramBotService.sendMessageToChannel(message);
-            return ResponseEntity.ok(Map.of("message", "Message sent to channel"));
-        } else {
-            try {
-                Long userId = Long.parseLong(target);
-                telegramBotService.sendMessageToUser(userId, message);
-                return ResponseEntity.ok(Map.of("message", "Message sent to user " + userId));
-            } catch (NumberFormatException e) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Invalid target"));
-            }
+        if (result.containsKey("error")) {
+            return ResponseEntity.badRequest().body(result);
         }
+        return ResponseEntity.ok(result);
     }
+
 }

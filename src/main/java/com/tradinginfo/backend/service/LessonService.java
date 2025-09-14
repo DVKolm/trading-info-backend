@@ -1,22 +1,27 @@
 package com.tradinginfo.backend.service;
 
+import com.tradinginfo.backend.dto.FolderDTO;
 import com.tradinginfo.backend.dto.LessonDTO;
 import com.tradinginfo.backend.dto.LessonStructureDTO;
 import com.tradinginfo.backend.dto.ProgressDTO;
+import com.tradinginfo.backend.entity.AnalyticsEvent;
 import com.tradinginfo.backend.entity.Lesson;
 import com.tradinginfo.backend.entity.User;
 import com.tradinginfo.backend.entity.UserProgress;
-import com.tradinginfo.backend.entity.AnalyticsEvent;
 import com.tradinginfo.backend.repository.LessonRepository;
-import com.tradinginfo.backend.repository.UserRepository;
 import com.tradinginfo.backend.repository.UserProgressRepository;
+import com.tradinginfo.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,90 +36,154 @@ public class LessonService {
     private final Optional<RedisCacheService> redisCacheService;
 
     @SuppressWarnings("unchecked")
-    public List<String> getLessonFolders() {
-        // Try to get from Redis cache first
-        if (redisCacheService.isPresent()) {
-            Object cached = redisCacheService.get().getCachedLessonFolders();
-            if (cached instanceof List) {
-                log.debug("📦 Retrieved lesson folders from Redis cache");
-                return (List<String>) cached;
-            }
-        }
+    public List<FolderDTO> getLessonFolders() {
+        return redisCacheService
+                .map(cache -> (List<FolderDTO>) cache.getCachedLessonFolders())
+                .filter(Objects::nonNull)
+                .orElseGet(this::loadAndCacheLessonFolders);
+    }
 
-        // Get from database
-        List<String> folders = lessonRepository.findAll().stream()
-                .map(Lesson::getParentFolder)
+    private List<FolderDTO> loadAndCacheLessonFolders() {
+        log.debug("Loading lesson folders from database");
+        List<String> folderNames = lessonRepository.findAll().stream()
+                .map(this::extractLevel)
                 .filter(Objects::nonNull)
                 .distinct()
-                .sorted()
+                .sorted(this::sortFoldersByLevel)
                 .collect(Collectors.toList());
 
-        // Cache in Redis
-        redisCacheService.ifPresent(cache -> cache.cacheLessonFolders(folders));
+        List<FolderDTO> folders = folderNames.stream()
+                .map(folderName -> FolderDTO.create(folderName, folderName))
+                .collect(Collectors.toList());
 
+        redisCacheService.ifPresent(cache -> cache.cacheLessonFolders(folders));
         return folders;
+    }
+
+    private static final Map<String, Integer> LEVEL_ORDER = Map.of(
+            "Начальный уровень (Бесплатно)", 1,
+            "Средний уровень (Подписка)", 2,
+            "Продвинутый уровень (Подписка)", 3,
+            "Эксперт уровень (Подписка)", 4
+    );
+
+    private int sortFoldersByLevel(String a, String b) {
+        Integer orderA = LEVEL_ORDER.getOrDefault(a, 999);
+        Integer orderB = LEVEL_ORDER.getOrDefault(b, 999);
+
+        if (orderA.equals(orderB)) {
+            return a.compareTo(b);
+        }
+
+        return Integer.compare(orderA, orderB);
     }
 
     public List<LessonStructureDTO> getLessonStructure() {
         List<Lesson> allLessons = lessonRepository.findAll();
-        Map<String, List<Lesson>> lessonsByFolder = allLessons.stream()
-                .filter(l -> l.getParentFolder() != null)
-                .collect(Collectors.groupingBy(Lesson::getParentFolder));
 
-        return lessonsByFolder.entrySet().stream()
-                .map(entry -> LessonStructureDTO.builder()
-                        .name(entry.getKey())
-                        .path(entry.getKey())
-                        .lessons(entry.getValue().stream()
-                                .sorted(Comparator.comparing(Lesson::getLessonNumber, Comparator.nullsLast(Integer::compareTo)))
-                                .map(lesson -> LessonStructureDTO.LessonItemDTO.builder()
-                                        .title(lesson.getTitle())
-                                        .path(lesson.getPath())
-                                        .lessonNumber(lesson.getLessonNumber())
-                                        .wordCount(lesson.getWordCount())
-                                        .build())
-                                .collect(Collectors.toList()))
-                        .build())
-                .sorted(Comparator.comparing(LessonStructureDTO::getName))
+        Map<String, List<Lesson>> lessonsByLevel = allLessons.stream()
+                .filter(lesson -> lesson.getParentFolder() != null)
+                .collect(Collectors.groupingBy(this::extractLevel));
+
+        return lessonsByLevel.entrySet().stream()
+                .map(this::createLevelStructure)
+                .sorted(this::sortLevelsByOrder)
                 .collect(Collectors.toList());
     }
 
-    public LessonDTO getLessonContent(String path, Long telegramId) {
-        // Try to get from Redis cache first
-        if (redisCacheService.isPresent()) {
-            Object cached = redisCacheService.get().getCachedLessonContent(path);
-            if (cached instanceof LessonDTO) {
-                log.debug("📦 Retrieved lesson content from Redis cache: {}", path);
-                if (telegramId != null) {
-                    trackLessonOpen(telegramId, path);
-                }
-                return (LessonDTO) cached;
-            }
+    private LessonStructureDTO createLevelStructure(Map.Entry<String, List<Lesson>> entry) {
+        String levelName = entry.getKey();
+        String levelId = generateId(levelName, "level");
+
+        List<LessonStructureDTO> children = entry.getValue().stream()
+                .sorted(Comparator.comparing(Lesson::getLessonNumber, Comparator.nullsLast(Integer::compareTo)))
+                .map(this::createLessonStructure)
+                .collect(Collectors.toList());
+
+        return LessonStructureDTO.createFolder(levelId, levelName, levelName, children);
+    }
+
+    private LessonStructureDTO createLessonStructure(Lesson lesson) {
+        String lessonId = generateId(lesson.getPath(), "lesson");
+        String filename = extractFilename(lesson.getPath());
+
+        return LessonStructureDTO.createFile(
+                lessonId,
+                lesson.getTitle(),
+                lesson.getPath(),
+                filename
+        );
+    }
+
+    private String extractLevel(Lesson lesson) {
+        String parentFolder = lesson.getParentFolder();
+
+        if (parentFolder.startsWith("Начальный уровень")) {
+            return "Начальный уровень (Бесплатно)";
+        } else if (parentFolder.startsWith("Средний уровень")) {
+            return "Средний уровень (Подписка)";
+        } else if (parentFolder.startsWith("Продвинутый уровень")) {
+            return "Продвинутый уровень (Подписка)";
+        } else if (parentFolder.startsWith("Эксперт")) {
+            return "Эксперт уровень (Подписка)";
         }
 
-        // Get from database
+        String[] parts = parentFolder.split("/");
+        return parts[0];
+    }
+
+    private int sortLevelsByOrder(LessonStructureDTO a, LessonStructureDTO b) {
+        Integer orderA = LEVEL_ORDER.getOrDefault(a.name(), 999);
+        Integer orderB = LEVEL_ORDER.getOrDefault(b.name(), 999);
+
+        if (orderA.equals(orderB)) {
+            return a.name().compareTo(b.name());
+        }
+
+        return Integer.compare(orderA, orderB);
+    }
+
+    private String generateId(String input, String type) {
+        String safeInput = input.replaceAll("[^a-zA-Z0-9]", "_");
+        return type + "_" + safeInput.toLowerCase() + "_" + Math.abs(input.hashCode() % 10000);
+    }
+
+    private String extractFilename(String path) {
+        String[] parts = path.split("/");
+        return parts.length > 0 ? parts[parts.length - 1] : "unknown.md";
+    }
+
+    public LessonDTO getLessonContent(String path, Long telegramId) {
+        Optional<LessonDTO> cachedLesson = redisCacheService
+                .map(cache -> cache.getCachedLessonContent(path))
+                .filter(LessonDTO.class::isInstance)
+                .map(LessonDTO.class::cast);
+
+        if (cachedLesson.isPresent()) {
+            log.debug("Retrieved lesson content from Redis cache: {}", path);
+            Optional.ofNullable(telegramId).ifPresent(id -> trackLessonOpen(id, path));
+            return cachedLesson.get();
+        }
+
         Lesson lesson = lessonRepository.findByPath(path)
-                .orElseThrow(() -> new RuntimeException("Lesson not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + path));
 
         LessonDTO lessonDTO = convertToDTO(lesson);
-
-        // Cache in Redis
         redisCacheService.ifPresent(cache -> cache.cacheLessonContent(path, lessonDTO));
-
-        if (telegramId != null) {
-            trackLessonOpen(telegramId, path);
-        }
+        Optional.ofNullable(telegramId).ifPresent(id -> trackLessonOpen(id, path));
 
         return lessonDTO;
     }
 
     public String resolveLessonLink(String name) {
         List<Lesson> lessons = lessonRepository.findAll();
+        String lowerCaseName = name.toLowerCase();
+
         return lessons.stream()
-                .filter(l -> l.getTitle().toLowerCase().contains(name.toLowerCase()))
+                .filter(lesson -> lesson.getTitle().toLowerCase().contains(lowerCaseName))
                 .findFirst()
                 .map(Lesson::getPath)
-                .orElseThrow(() -> new RuntimeException("Link not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Link not found: " + name));
     }
 
     public List<LessonDTO> searchLessons(String query) {
@@ -125,31 +194,18 @@ public class LessonService {
 
     public void updateProgress(Long telegramId, ProgressDTO progressData) {
         User user = userRepository.findByTelegramId(telegramId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + telegramId));
 
         UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), progressData.getLessonPath())
-                .orElseGet(() -> {
-                    UserProgress newProgress = new UserProgress();
-                    newProgress.setUser(user);
-                    newProgress.setLessonPath(progressData.getLessonPath());
-                    return newProgress;
-                });
+                .orElseGet(() -> createNewUserProgress(user, progressData.getLessonPath()));
 
-        progress.setTimeSpent(progress.getTimeSpent() + progressData.getTimeSpent());
-        progress.setScrollProgress(progressData.getScrollProgress());
-        progress.setReadingSpeed(progressData.getReadingSpeed());
-        progress.setCompletionScore(progressData.getCompletionScore());
-        progress.setEngagementLevel(progressData.getEngagementLevel());
-        progress.setCompleted(progressData.getCompleted());
-        progress.setLastVisited(LocalDateTime.now());
-        progress.setVisits(progress.getVisits() + 1);
-
+        updateProgressData(progress, progressData);
         userProgressRepository.save(progress);
     }
 
     public void trackAnalyticsEvent(Long telegramId, Map<String, Object> eventData) {
         User user = userRepository.findByTelegramId(telegramId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + telegramId));
 
         AnalyticsEvent event = new AnalyticsEvent();
         event.setUser(user);
@@ -159,16 +215,36 @@ public class LessonService {
         event.setData(eventData);
     }
 
+    private UserProgress createNewUserProgress(User user, String lessonPath) {
+        UserProgress newProgress = new UserProgress();
+        newProgress.setUser(user);
+        newProgress.setLessonPath(lessonPath);
+        return newProgress;
+    }
+
+    private void updateProgressData(UserProgress progress, ProgressDTO progressData) {
+        progress.setTimeSpent(progress.getTimeSpent() + progressData.getTimeSpent());
+        progress.setScrollProgress(progressData.getScrollProgress());
+        progress.setReadingSpeed(progressData.getReadingSpeed());
+        progress.setCompletionScore(progressData.getCompletionScore());
+        progress.setEngagementLevel(progressData.getEngagementLevel());
+        progress.setCompleted(progressData.getCompleted());
+        progress.setLastVisited(LocalDateTime.now());
+        progress.setVisits(progress.getVisits() + 1);
+    }
+
     private void trackLessonOpen(Long telegramId, String lessonPath) {
         User user = userRepository.findByTelegramId(telegramId)
-                .orElseGet(() -> {
-                    User newUser = new User();
-                    newUser.setTelegramId(telegramId);
-                    return userRepository.save(newUser);
-                });
+                .orElseGet(() -> createNewUser(telegramId));
 
         user.setLastActive(LocalDateTime.now());
         userRepository.save(user);
+    }
+
+    private User createNewUser(Long telegramId) {
+        User newUser = new User();
+        newUser.setTelegramId(telegramId);
+        return userRepository.save(newUser);
     }
 
     private LessonDTO convertToDTO(Lesson lesson) {
