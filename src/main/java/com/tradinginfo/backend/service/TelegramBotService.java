@@ -104,6 +104,18 @@ public class TelegramBotService {
     }
 
     /**
+     * Check if user is subscribed to channel (synchronous)
+     */
+    public boolean checkChannelMembership(Long userId) {
+        try {
+            return checkChannelSubscription(userId).block();
+        } catch (Exception e) {
+            log.warn("Failed to check channel membership for user {}: {}", userId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Check if user is subscribed to channel
      */
     public Mono<Boolean> checkChannelSubscription(Long userId) {

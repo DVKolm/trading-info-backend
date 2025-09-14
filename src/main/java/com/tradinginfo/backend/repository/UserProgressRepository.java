@@ -19,4 +19,7 @@ public interface UserProgressRepository extends JpaRepository<UserProgress, Long
 
     @Query("SELECT SUM(up.timeSpent) FROM UserProgress up WHERE up.user.id = :userId")
     Long getTotalTimeSpentByUserId(@Param("userId") Long userId);
+
+    @Query("SELECT up FROM UserProgress up WHERE up.user.telegramId = :telegramId AND up.lessonPath = :lessonPath")
+    Optional<UserProgress> findByTelegramId(@Param("telegramId") Long telegramId, @Param("lessonPath") String lessonPath);
 }

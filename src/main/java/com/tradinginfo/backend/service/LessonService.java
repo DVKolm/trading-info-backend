@@ -75,7 +75,7 @@ public class LessonService {
                                         .build())
                                 .collect(Collectors.toList()))
                         .build())
-                .sorted(Comparator.comparing(LessonStructureDTO::getName))
+                .sorted(Comparator.comparing(LessonStructureDTO::name))
                 .collect(Collectors.toList());
     }
 
@@ -127,20 +127,20 @@ public class LessonService {
         User user = userRepository.findByTelegramId(telegramId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), progressData.getLessonPath())
+        UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), progressData.lessonPath())
                 .orElseGet(() -> {
                     UserProgress newProgress = new UserProgress();
                     newProgress.setUser(user);
-                    newProgress.setLessonPath(progressData.getLessonPath());
+                    newProgress.setLessonPath(progressData.lessonPath());
                     return newProgress;
                 });
 
-        progress.setTimeSpent(progress.getTimeSpent() + progressData.getTimeSpent());
-        progress.setScrollProgress(progressData.getScrollProgress());
-        progress.setReadingSpeed(progressData.getReadingSpeed());
-        progress.setCompletionScore(progressData.getCompletionScore());
-        progress.setEngagementLevel(progressData.getEngagementLevel());
-        progress.setCompleted(progressData.getCompleted());
+        progress.setTimeSpent(progress.getTimeSpent() + progressData.timeSpent());
+        progress.setScrollProgress(progressData.scrollProgress());
+        progress.setReadingSpeed(progressData.readingSpeed());
+        progress.setCompletionScore(progressData.completionScore());
+        progress.setEngagementLevel(progressData.engagementLevel());
+        progress.setCompleted(progressData.completed());
         progress.setLastVisited(LocalDateTime.now());
         progress.setVisits(progress.getVisits() + 1);
 

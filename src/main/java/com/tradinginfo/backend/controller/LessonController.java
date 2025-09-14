@@ -63,7 +63,7 @@ public class LessonController {
     public ResponseEntity<Map<String, String>> updateProgress(
             @RequestBody ProgressDTO progressData,
             @RequestHeader("X-Telegram-User-Id") Long telegramId) {
-        log.info("📊 Updating progress for user {} on lesson {}", telegramId, progressData.getLessonPath());
+        log.info("📊 Updating progress for user {} on lesson {}", telegramId, progressData.lessonPath());
         lessonService.updateProgress(telegramId, progressData);
         return ResponseEntity.ok(Map.of("status", "success"));
     }

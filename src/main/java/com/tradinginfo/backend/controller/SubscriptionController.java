@@ -2,6 +2,7 @@ package com.tradinginfo.backend.controller;
 
 import com.tradinginfo.backend.service.TelegramBotService;
 import com.tradinginfo.backend.service.TelegramAuthService;
+import com.tradinginfo.backend.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ public class SubscriptionController {
 
     private final TelegramBotService telegramBotService;
     private final TelegramAuthService telegramAuthService;
+    private final SubscriptionService subscriptionService;
 
     @GetMapping("/status/{userId}")
     public Mono<ResponseEntity<Map<String, Object>>> getSubscriptionStatus(@PathVariable Long userId) {
@@ -45,18 +47,41 @@ public class SubscriptionController {
 
     @PostMapping("/verify")
     public ResponseEntity<Map<String, Object>> verifySubscription(@RequestBody Map<String, Object> request) {
-        String initData = (String) request.get("initData");
-        log.info("✅ Verifying subscription with initData");
+        Long telegramId = (Long) request.get("telegramId");
 
-        // For now, always return valid subscription
-        // In production, implement proper Telegram subscription verification
-        Map<String, Object> response = Map.of(
-                "valid", true,
-                "hasAccess", true,
-                "subscriptionLevel", "premium",
-                "message", "Subscription verified successfully"
-        );
+        log.info("✅ Verifying subscription with initData for user: {}", telegramId);
 
-        return ResponseEntity.ok(response);
+        if (telegramId == null) {
+            log.warn("⚠️ Missing telegramId in verification request");
+            return ResponseEntity.badRequest().body(Map.of(
+                    "valid", false,
+                    "hasAccess", false,
+                    "error", "Missing telegramId"
+            ));
+        }
+
+        try {
+            // Check subscription status
+            var subscriptionStatus = subscriptionService.getSubscriptionStatus(telegramId);
+
+            Map<String, Object> response = Map.of(
+                    "valid", true,
+                    "hasAccess", subscriptionStatus.subscribed(),
+                    "subscriptionLevel", subscriptionStatus.subscribed() ? "premium" : "free",
+                    "message", subscriptionStatus.subscribed() ?
+                        "Subscription verified successfully" :
+                        "No active subscription found",
+                    "subscriptionStatus", subscriptionStatus
+            );
+
+            log.info("✅ Subscription verification completed for user {}: hasAccess={}",
+                    telegramId, subscriptionStatus.subscribed());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("❌ Error verifying subscription for user {}: {}", telegramId, e.getMessage());
+            return ResponseEntity.ok(subscriptionService.createSubscriptionErrorResponse());
+        }
     }
 }

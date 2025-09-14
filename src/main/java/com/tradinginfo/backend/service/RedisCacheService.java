@@ -26,6 +26,9 @@ public class RedisCacheService {
     // Cache TTL (10 minutes)
     private static final Duration CACHE_TTL = Duration.ofMinutes(10);
 
+    // Subscription cache prefix
+    private static final String SUBSCRIPTION_STATUS_PREFIX = "subscription:status:";
+
     /**
      * Cache lesson content
      */
@@ -182,6 +185,45 @@ public class RedisCacheService {
             log.info("🧹 Cleared all cache successfully");
         } catch (Exception e) {
             log.warn("Failed to clear all cache", e);
+        }
+    }
+
+    /**
+     * Cache subscription status
+     */
+    public void cacheSubscriptionStatus(Long telegramId, Object status, long durationMinutes) {
+        try {
+            String key = SUBSCRIPTION_STATUS_PREFIX + telegramId;
+            redisTemplate.opsForValue().set(key, status, Duration.ofMinutes(durationMinutes));
+            log.debug("📦 Cached subscription status for user {}", telegramId);
+        } catch (Exception e) {
+            log.warn("Failed to cache subscription status for user {}", telegramId, e);
+        }
+    }
+
+    /**
+     * Get cached subscription status
+     */
+    public Object getCachedSubscriptionStatus(Long telegramId) {
+        try {
+            String key = SUBSCRIPTION_STATUS_PREFIX + telegramId;
+            return redisTemplate.opsForValue().get(key);
+        } catch (Exception e) {
+            log.warn("Failed to get cached subscription status for user {}", telegramId, e);
+            return null;
+        }
+    }
+
+    /**
+     * Invalidate subscription status cache
+     */
+    public void invalidateSubscriptionStatus(Long telegramId) {
+        try {
+            String key = SUBSCRIPTION_STATUS_PREFIX + telegramId;
+            redisTemplate.delete(key);
+            log.debug("🗑️ Invalidated subscription status cache for user {}", telegramId);
+        } catch (Exception e) {
+            log.warn("Failed to invalidate subscription status cache for user {}", telegramId, e);
         }
     }
 

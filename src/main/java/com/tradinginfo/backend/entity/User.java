@@ -36,6 +36,21 @@ public class User {
     @Column(name = "is_premium")
     private Boolean isPremium = false;
 
+    @Column(name = "premium_access")
+    private Boolean premiumAccess = false;
+
+    @Column(name = "subscribed")
+    private Boolean subscribed = false;
+
+    @Column(name = "subscription_started_at")
+    private LocalDateTime subscriptionStartedAt;
+
+    @Column(name = "subscription_verified_at")
+    private LocalDateTime subscriptionVerifiedAt;
+
+    @Column(name = "subscription_expires_at")
+    private LocalDateTime subscriptionExpiresAt;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 
