@@ -285,4 +285,100 @@ public class UploadService {
             }
         }
     }
+
+    public void deleteSingleLesson(String lessonPath, Long telegramId) {
+        Lesson lesson = lessonRepository.findByPath(lessonPath)
+                .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + lessonPath));
+
+        lessonRepository.delete(lesson);
+        log.info("✅ Deleted single lesson: {}", lessonPath);
+
+        // Send Telegram notification for lesson deletion
+        if (telegramBotService.isPresent()) {
+            try {
+                String message = String.format("🗑️ *Урок удален*\n\n" +
+                        "Файл: `%s`\n" +
+                        "Название: `%s`",
+                        lessonPath, lesson.getTitle());
+
+                telegramBotService.get().sendMessageToChannel(message, "Markdown");
+                log.info("✅ Telegram notification sent for lesson deletion");
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to send Telegram notification", e);
+            }
+        }
+    }
+
+    public void createFolder(String folderName, Long telegramId) {
+        if (folderName == null || folderName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Folder name cannot be empty");
+        }
+
+        String cleanFolderName = folderName.trim();
+
+        // Check if folder already exists (has lessons)
+        List<Lesson> existingLessons = lessonRepository.findByParentFolder(cleanFolderName);
+        if (!existingLessons.isEmpty()) {
+            throw new IllegalArgumentException("Folder already exists: " + cleanFolderName);
+        }
+
+        log.info("✅ Folder created: {}", cleanFolderName);
+
+        // Send Telegram notification for folder creation
+        if (telegramBotService.isPresent()) {
+            try {
+                String message = String.format("📁 *Новая папка создана*\\n\\n" +
+                        "Название папки: `%s`", cleanFolderName);
+
+                telegramBotService.get().sendMessageToChannel(message, "Markdown");
+                log.info("✅ Telegram notification sent for folder creation");
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to send Telegram notification", e);
+            }
+        }
+    }
+
+    public Map<String, Object> getFileTreeForAdmin() {
+        try {
+            List<Lesson> allLessons = lessonRepository.findAll();
+            List<Map<String, Object>> fileTree = new ArrayList<>();
+
+            // Group lessons by folder
+            Map<String, List<Lesson>> lessonsByFolder = allLessons.stream()
+                    .filter(lesson -> lesson.getParentFolder() != null)
+                    .collect(java.util.stream.Collectors.groupingBy(Lesson::getParentFolder));
+
+            // Create folder structure for admin panel
+            for (Map.Entry<String, List<Lesson>> folderEntry : lessonsByFolder.entrySet()) {
+                String folderName = folderEntry.getKey();
+                List<Lesson> lessons = folderEntry.getValue();
+
+                Map<String, Object> folder = new HashMap<>();
+                folder.put("id", "folder_" + Math.abs(folderName.hashCode()));
+                folder.put("name", folderName);
+                folder.put("type", "folder");
+                folder.put("path", folderName);
+
+                List<Map<String, Object>> children = new ArrayList<>();
+                for (Lesson lesson : lessons) {
+                    Map<String, Object> file = new HashMap<>();
+                    // Only use basic data types, avoid Entity serialization issues
+                    file.put("id", "file_" + lesson.getId());
+                    file.put("name", lesson.getTitle() != null ? lesson.getTitle() : "Unnamed");
+                    file.put("type", "file");
+                    file.put("path", lesson.getPath() != null ? lesson.getPath() : "");
+                    children.add(file);
+                }
+                folder.put("children", children);
+                fileTree.add(folder);
+            }
+
+            log.info("✅ Generated file tree with {} folders", fileTree.size());
+            return Map.of("structure", fileTree);
+
+        } catch (Exception e) {
+            log.error("❌ Error generating file tree for admin", e);
+            return Map.of("structure", new ArrayList<>(), "error", "Failed to load file tree");
+        }
+    }
 }

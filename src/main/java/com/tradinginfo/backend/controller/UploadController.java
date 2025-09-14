@@ -73,6 +73,90 @@ public class UploadController {
         return ResponseEntity.ok(result);
     }
 
+    @DeleteMapping("/lesson")
+    public ResponseEntity<Map<String, String>> deleteSingleLesson(
+            @RequestBody Map<String, String> request) {
+
+        String initData = request.get("initData");
+        String lessonPath = request.get("lessonPath");
+
+        log.info("🗑️ Deleting single lesson: {}", lessonPath);
+
+        // Extract telegram user ID from initData
+        Long telegramId = telegramAuthService.extractTelegramUserId(initData);
+
+        // Validate initData and check admin permissions
+        if (!telegramAuthService.validateInitData(initData)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
+        }
+
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        try {
+            uploadService.deleteSingleLesson(lessonPath, telegramId);
+
+            // Clear lesson cache after successful deletion
+            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+
+            return ResponseEntity.ok(Map.of("message", "Lesson deleted successfully"));
+        } catch (Exception e) {
+            log.error("Error deleting lesson: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to delete lesson: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/file-tree")
+    public ResponseEntity<Map<String, Object>> getFileTree(
+            @RequestHeader("X-Telegram-User-Id") Long telegramId) {
+
+        log.info("🗂️ Getting file tree for admin panel");
+
+        // Check admin permissions
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        // Get lesson structure and transform for admin panel
+        Map<String, Object> result = uploadService.getFileTreeForAdmin();
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/folder")
+    public ResponseEntity<Map<String, String>> createFolder(
+            @RequestBody Map<String, String> request) {
+
+        String initData = request.get("initData");
+        String folderName = request.get("folderName");
+
+        log.info("📁 Creating folder: {}", folderName);
+
+        // Extract telegram user ID from initData
+        Long telegramId = telegramAuthService.extractTelegramUserId(initData);
+
+        // Validate initData and check admin permissions
+        if (!telegramAuthService.validateInitData(initData)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
+        }
+
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        try {
+            uploadService.createFolder(folderName, telegramId);
+
+            // Clear lesson cache after folder creation
+            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+
+            return ResponseEntity.ok(Map.of("message", "Folder created successfully: " + folderName));
+        } catch (Exception e) {
+            log.error("Error creating folder: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to create folder: " + e.getMessage()));
+        }
+    }
+
     @PostMapping("/clear-cache")
     public ResponseEntity<Map<String, String>> clearCache(
             @RequestParam("initData") String initData) {
