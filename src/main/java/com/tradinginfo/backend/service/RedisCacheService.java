@@ -238,4 +238,59 @@ public class RedisCacheService {
             return false;
         }
     }
+
+    /**
+     * Cache user statistics
+     */
+    public void cacheUserStatistics(Long telegramId, Object statistics) {
+        try {
+            String key = "user:statistics:" + telegramId;
+            redisTemplate.opsForValue().set(key, statistics, CACHE_TTL);
+            log.debug("Cached user statistics for user {}", telegramId);
+        } catch (Exception e) {
+            log.warn("Failed to cache user statistics for user {}", telegramId, e);
+        }
+    }
+
+    /**
+     * Get cached user statistics
+     */
+    public Object getCachedUserStatistics(Long telegramId) {
+        try {
+            String key = "user:statistics:" + telegramId;
+            return redisTemplate.opsForValue().get(key);
+        } catch (Exception e) {
+            log.warn("Failed to get cached user statistics for user {}", telegramId, e);
+            return null;
+        }
+    }
+
+    /**
+     * Invalidate user progress
+     */
+    public void invalidateUserProgress(Long telegramId) {
+        try {
+            String pattern = "user:*:" + telegramId;
+            Set<String> keys = redisTemplate.keys(pattern);
+            if (keys != null && !keys.isEmpty()) {
+                redisTemplate.delete(keys);
+                log.debug("Invalidated user progress cache for user {}", telegramId);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to invalidate user progress cache for user {}", telegramId, e);
+        }
+    }
+
+    /**
+     * Store analytics event
+     */
+    public void storeAnalyticsEvent(java.util.Map<String, Object> eventData) {
+        try {
+            String key = "analytics:event:" + System.currentTimeMillis();
+            redisTemplate.opsForValue().set(key, eventData, Duration.ofHours(24));
+            log.debug("Stored analytics event");
+        } catch (Exception e) {
+            log.warn("Failed to store analytics event", e);
+        }
+    }
 }

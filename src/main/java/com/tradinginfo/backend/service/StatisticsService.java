@@ -1,10 +1,7 @@
 package com.tradinginfo.backend.service;
 
 import com.tradinginfo.backend.dto.UserStatisticsDTO;
-<<<<<<< HEAD
 import com.tradinginfo.backend.entity.User;
-=======
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 import com.tradinginfo.backend.entity.UserProgress;
 import com.tradinginfo.backend.repository.UserProgressRepository;
 import com.tradinginfo.backend.repository.UserRepository;
@@ -13,17 +10,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-<<<<<<< HEAD
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.List;
-=======
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 
 @Service
 @RequiredArgsConstructor
@@ -31,78 +23,6 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class StatisticsService {
 
-<<<<<<< HEAD
-    private final UserProgressRepository userProgressRepository;
-    private final UserRepository userRepository;
-
-    public UserStatisticsDTO getUserStatistics(Long telegramId) {
-        User user = userRepository.findByTelegramId(telegramId).orElse(null);
-        if (user == null) {
-            return UserStatisticsDTO.builder()
-                    .telegramId(telegramId)
-                    .totalLessonsRead(0)
-                    .completedLessons(0)
-                    .totalTimeSpent(0L)
-                    .averageReadingSpeed(0.0)
-                    .completionRate(0.0)
-                    .totalVisits(0)
-                    .lastActivity(LocalDateTime.now())
-                    .engagementLevel("new")
-                    .build();
-        }
-
-        List<UserProgress> progressList = userProgressRepository.findByUserId(user.getId());
-
-        int totalLessonsRead = progressList.size();
-        int completedLessons = (int) progressList.stream()
-                .filter(p -> Boolean.TRUE.equals(p.getCompleted()))
-                .count();
-
-        long totalTimeSpent = progressList.stream()
-                .mapToLong(p -> p.getTimeSpent() != null ? p.getTimeSpent() : 0)
-                .sum();
-
-        double averageReadingSpeed = progressList.stream()
-                .filter(p -> p.getReadingSpeed() != null && p.getReadingSpeed().compareTo(BigDecimal.ZERO) > 0)
-                .mapToDouble(p -> p.getReadingSpeed().doubleValue())
-                .average()
-                .orElse(0.0);
-
-        double completionRate = totalLessonsRead > 0 ? (double) completedLessons / totalLessonsRead * 100 : 0.0;
-
-        int totalVisits = progressList.stream()
-                .mapToInt(p -> p.getVisits() != null ? p.getVisits() : 0)
-                .sum();
-
-        LocalDateTime lastActivity = progressList.stream()
-                .filter(p -> p.getLastVisited() != null)
-                .map(UserProgress::getLastVisited)
-                .max(LocalDateTime::compareTo)
-                .orElse(user.getLastActive());
-
-        String engagementLevel = calculateEngagementLevel(totalVisits, completionRate, totalTimeSpent);
-
-        return UserStatisticsDTO.builder()
-                .telegramId(telegramId)
-                .totalLessonsRead(totalLessonsRead)
-                .completedLessons(completedLessons)
-                .totalTimeSpent(totalTimeSpent)
-                .averageReadingSpeed(averageReadingSpeed)
-                .completionRate(completionRate)
-                .totalVisits(totalVisits)
-                .lastActivity(lastActivity)
-                .engagementLevel(engagementLevel)
-                .build();
-    }
-
-    private String calculateEngagementLevel(int totalVisits, double completionRate, long totalTimeSpent) {
-        if (totalVisits == 0) return "new";
-        if (totalVisits < 5) return "beginner";
-        if (completionRate > 75 && totalTimeSpent > 3600) return "expert";
-        if (completionRate > 50 && totalTimeSpent > 1800) return "advanced";
-        if (completionRate > 25) return "intermediate";
-        return "casual";
-=======
     private final UserRepository userRepository;
     private final UserProgressRepository userProgressRepository;
     private final Optional<RedisCacheService> redisCacheService;
@@ -163,6 +83,7 @@ public class StatisticsService {
 
         // Get unique days when user was active
         List<LocalDate> activeDays = progressList.stream()
+                .filter(p -> p.getLastVisited() != null)
                 .map(p -> p.getLastVisited().toLocalDate())
                 .collect(Collectors.toSet())
                 .stream()
@@ -201,6 +122,7 @@ public class StatisticsService {
         if (progressList.isEmpty()) return 0;
 
         List<LocalDate> activeDays = progressList.stream()
+                .filter(p -> p.getLastVisited() != null)
                 .map(p -> p.getLastVisited().toLocalDate())
                 .collect(Collectors.toSet())
                 .stream()
@@ -232,7 +154,7 @@ public class StatisticsService {
      */
     private int countCompletedLessons(List<UserProgress> progressList) {
         return (int) progressList.stream()
-                .filter(UserProgress::getCompleted)
+                .filter(p -> Boolean.TRUE.equals(p.getCompleted()))
                 .count();
     }
 
@@ -241,7 +163,7 @@ public class StatisticsService {
      */
     private long calculateTotalTimeSpent(List<UserProgress> progressList) {
         return progressList.stream()
-                .mapToLong(UserProgress::getTimeSpent)
+                .mapToLong(p -> p.getTimeSpent() != null ? p.getTimeSpent() : 0)
                 .sum();
     }
 
@@ -251,7 +173,9 @@ public class StatisticsService {
     private double calculateAverageReadingSpeed(List<UserProgress> progressList) {
         List<Double> speeds = progressList.stream()
                 .map(UserProgress::getReadingSpeed)
-                .filter(speed -> speed > 0)
+                .filter(Objects::nonNull)
+                .filter(speed -> speed.compareTo(BigDecimal.ZERO) > 0)
+                .map(BigDecimal::doubleValue)
                 .collect(Collectors.toList());
 
         if (speeds.isEmpty()) return 0.0;
@@ -287,12 +211,12 @@ public class StatisticsService {
 
         for (String level : levels) {
             List<UserProgress> levelLessons = progressList.stream()
-                    .filter(p -> p.getLessonPath().contains(level))
+                    .filter(p -> p.getLessonPath() != null && p.getLessonPath().contains(level))
                     .collect(Collectors.toList());
 
             if (!levelLessons.isEmpty()) {
                 long completed = levelLessons.stream()
-                        .filter(UserProgress::getCompleted)
+                        .filter(p -> Boolean.TRUE.equals(p.getCompleted()))
                         .count();
                 double progress = (completed * 100.0) / levelLessons.size();
                 levelProgress.put(level, progress);
@@ -309,6 +233,7 @@ public class StatisticsService {
      */
     private List<Map<String, Object>> getRecentActivity(List<UserProgress> progressList) {
         return progressList.stream()
+                .filter(p -> p.getLastVisited() != null)
                 .sorted(Comparator.comparing(UserProgress::getLastVisited).reversed())
                 .limit(10)
                 .map(progress -> {
@@ -376,30 +301,57 @@ public class StatisticsService {
     }
 
     /**
+     * Calculate engagement level - backward compatibility method
+     */
+    private String calculateEngagementLevel(int totalVisits, double completionRate, long totalTimeSpent) {
+        if (totalVisits == 0) return "new";
+        if (totalVisits < 5) return "beginner";
+        if (completionRate > 75 && totalTimeSpent > 3600) return "expert";
+        if (completionRate > 50 && totalTimeSpent > 1800) return "advanced";
+        if (completionRate > 25) return "intermediate";
+        return "casual";
+    }
+
+    /**
      * Get current streak for a user
      */
     public int getCurrentStreak(Long telegramId) {
-        UserStatisticsDTO statistics = getUserStatistics(telegramId);
-        return statistics.currentStreak();
+        User user = userRepository.findByTelegramId(telegramId).orElse(null);
+        if (user == null) return 0;
+
+        List<UserProgress> progressList = userProgressRepository.findByUserId(user.getId());
+        return calculateCurrentStreak(progressList);
     }
 
     /**
      * Get level progress for a user
      */
     public Map<String, Double> getLevelProgress(Long telegramId) {
-        UserStatisticsDTO statistics = getUserStatistics(telegramId);
-        return statistics.levelProgress();
+        User user = userRepository.findByTelegramId(telegramId).orElse(null);
+        if (user == null) return new HashMap<>();
+
+        List<UserProgress> progressList = userProgressRepository.findByUserId(user.getId());
+        return calculateLevelProgress(progressList);
     }
 
     /**
      * Get achievements summary for a user
      */
     public Map<String, Object> getAchievementsSummary(Long telegramId) {
-        UserStatisticsDTO statistics = getUserStatistics(telegramId);
+        User user = userRepository.findByTelegramId(telegramId).orElse(null);
+        if (user == null) {
+            Map<String, Object> emptySummary = new HashMap<>();
+            emptySummary.put("achievements", new ArrayList<>());
+            emptySummary.put("totalCompleted", 0);
+            emptySummary.put("currentStreak", 0);
+            return emptySummary;
+        }
+
+        List<UserProgress> progressList = userProgressRepository.findByUserId(user.getId());
         Map<String, Object> achievementSummary = new HashMap<>();
-        achievementSummary.put("achievements", statistics.achievements());
-        achievementSummary.put("totalCompleted", statistics.totalLessonsCompleted());
-        achievementSummary.put("currentStreak", statistics.currentStreak());
+        achievementSummary.put("achievements", calculateAchievements(progressList));
+        achievementSummary.put("totalCompleted", countCompletedLessons(progressList));
+        achievementSummary.put("currentStreak", calculateCurrentStreak(progressList));
         return achievementSummary;
     }
 
@@ -407,53 +359,65 @@ public class StatisticsService {
      * Get learning insights and recommendations
      */
     public Map<String, Object> getLearningInsights(Long telegramId) {
-        UserStatisticsDTO statistics = getUserStatistics(telegramId);
+        User user = userRepository.findByTelegramId(telegramId).orElse(null);
         Map<String, Object> insights = new HashMap<String, Object>();
 
+        if (user == null) {
+            insights.put("readingPace", "No data available yet. Start your first lesson!");
+            insights.put("streak", "Start your learning streak today!");
+            insights.put("completion", "Begin your learning journey!");
+            insights.put("nextAction", "Start with your first lesson in the Beginner level");
+            return insights;
+        }
+
+        List<UserProgress> progressList = userProgressRepository.findByUserId(user.getId());
+        double averageReadingSpeed = calculateAverageReadingSpeed(progressList);
+        int currentStreak = calculateCurrentStreak(progressList);
+        double completionRate = calculateCompletionRate(progressList);
+
         // Reading pace insight
-        if (statistics.getAverageReadingSpeed() < 150) {
+        if (averageReadingSpeed < 150) {
             insights.put("readingPace", "Your reading speed is below average. Try to focus more during reading sessions.");
-        } else if (statistics.getAverageReadingSpeed() > 250) {
+        } else if (averageReadingSpeed > 250) {
             insights.put("readingPace", "Excellent reading speed! You're a fast learner.");
         } else {
             insights.put("readingPace", "Good reading speed. Keep it up!");
         }
 
         // Streak insight
-        if (statistics.getCurrentStreak() == 0) {
+        if (currentStreak == 0) {
             insights.put("streak", "Start your learning streak today!");
-        } else if (statistics.getCurrentStreak() < 7) {
-            insights.put("streak", "Keep going! " + (7 - statistics.getCurrentStreak()) + " more days to a week streak!");
+        } else if (currentStreak < 7) {
+            insights.put("streak", "Keep going! " + (7 - currentStreak) + " more days to a week streak!");
         } else {
-            insights.put("streak", "Amazing! You've been learning for " + statistics.getCurrentStreak() + " days straight!");
+            insights.put("streak", "Amazing! You've been learning for " + currentStreak + " days straight!");
         }
 
         // Completion rate insight
-        if (statistics.getCompletionRate() < 50) {
+        if (completionRate < 50) {
             insights.put("completion", "Try to complete more lessons to improve your understanding.");
-        } else if (statistics.getCompletionRate() < 80) {
+        } else if (completionRate < 80) {
             insights.put("completion", "Good progress! Aim to complete more lessons.");
         } else {
             insights.put("completion", "Excellent completion rate! You're very thorough.");
         }
 
         // Next recommended action
-        insights.put("nextAction", getNextRecommendedAction(statistics));
+        insights.put("nextAction", getNextRecommendedAction(progressList));
 
         return insights;
     }
 
-    private String getNextRecommendedAction(UserStatisticsDTO statistics) {
-        if (statistics.getTotalLessonsViewed() == 0) {
+    private String getNextRecommendedAction(List<UserProgress> progressList) {
+        if (progressList.isEmpty()) {
             return "Start with your first lesson in the Beginner level";
         }
-        if (statistics.getCurrentStreak() == 0) {
+        if (calculateCurrentStreak(progressList) == 0) {
             return "Resume your learning to maintain your streak";
         }
-        if (statistics.getCompletionRate() < 50) {
+        if (calculateCompletionRate(progressList) < 50) {
             return "Focus on completing the lessons you've started";
         }
         return "Continue to the next lesson in your current level";
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
     }
 }

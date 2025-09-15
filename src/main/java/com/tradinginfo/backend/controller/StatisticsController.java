@@ -7,13 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-<<<<<<< HEAD
-@RestController
-@RequestMapping("/statistics")
-@RequiredArgsConstructor
-@Slf4j
-@CrossOrigin
-=======
 import java.util.Map;
 
 @RestController
@@ -21,19 +14,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 @CrossOrigin(origins = "*")
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 public class StatisticsController {
 
     private final StatisticsService statisticsService;
 
-<<<<<<< HEAD
-    @GetMapping("/user/{telegramId}")
-    public ResponseEntity<UserStatisticsDTO> getUserStatistics(@PathVariable Long telegramId) {
-        log.info("📈 Getting statistics for user {}", telegramId);
-        UserStatisticsDTO statistics = statisticsService.getUserStatistics(telegramId);
-        return ResponseEntity.ok(statistics);
-    }
-=======
     /**
      * Get user statistics
      */
@@ -82,5 +66,4 @@ public class StatisticsController {
         Map<String, Object> achievements = statisticsService.getAchievementsSummary(telegramId);
         return ResponseEntity.ok(achievements);
     }
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 }

@@ -416,25 +416,44 @@ public class UploadService {
 
 
     public void createFolder(String folderName, Long telegramId) {
+        createFolder(folderName, telegramId, false);
+    }
+
+    public void createFolder(String folderName, Long telegramId, Boolean subscriptionRequired) {
         if (folderName == null || folderName.trim().isEmpty()) {
             throw new IllegalArgumentException("Folder name cannot be empty");
         }
 
         String cleanFolderName = folderName.trim();
 
-        // Check if folder already exists (has lessons)
-        List<Lesson> existingLessons = lessonRepository.findByParentFolder(cleanFolderName);
-        if (!existingLessons.isEmpty()) {
+        // Check if folder already exists as a Lesson entity
+        Optional<Lesson> existingFolder = lessonRepository.findByPath(cleanFolderName);
+        if (existingFolder.isPresent()) {
             throw new IllegalArgumentException("Folder already exists: " + cleanFolderName);
         }
 
-        log.info("✅ Folder created: {}", cleanFolderName);
+        // Create folder as a Lesson entity
+        Lesson folderLesson = new Lesson();
+        folderLesson.setPath(cleanFolderName);
+        folderLesson.setTitle(cleanFolderName);
+        folderLesson.setContent("");
+        folderLesson.setHtmlContent("");
+        folderLesson.setIsFolder(true);
+        folderLesson.setSubscriptionRequired(subscriptionRequired != null ? subscriptionRequired : false);
+        folderLesson.setParentFolder(null);
+        folderLesson.setWordCount(0);
+
+        lessonRepository.save(folderLesson);
+
+        log.info("✅ Folder created: {} with subscription required: {}", cleanFolderName, subscriptionRequired);
 
         // Send Telegram notification for folder creation
         if (telegramBotService.isPresent()) {
             try {
+                String accessType = (subscriptionRequired != null && subscriptionRequired) ? "💎 Требует подписку" : "🆓 Свободный доступ";
                 String message = String.format("📁 *Новая папка создана*\\n\\n" +
-                        "Название папки: `%s`", cleanFolderName);
+                        "Название папки: `%s`\\n" +
+                        "Доступ: %s", cleanFolderName, accessType);
 
                 telegramBotService.get().sendMessageToChannel(message, "Markdown");
                 log.info("✅ Telegram notification sent for folder creation");
@@ -442,6 +461,23 @@ public class UploadService {
                 log.warn("⚠️ Failed to send Telegram notification", e);
             }
         }
+    }
+
+    public void updateFolderSubscription(String folderPath, Boolean subscriptionRequired) {
+        if (folderPath == null || folderPath.trim().isEmpty()) {
+            throw new IllegalArgumentException("Folder path cannot be empty");
+        }
+
+        Optional<Lesson> folder = lessonRepository.findByPath(folderPath);
+        if (folder.isEmpty() || !Boolean.TRUE.equals(folder.get().getIsFolder())) {
+            throw new IllegalArgumentException("Folder not found: " + folderPath);
+        }
+
+        Lesson folderLesson = folder.get();
+        folderLesson.setSubscriptionRequired(subscriptionRequired != null ? subscriptionRequired : false);
+        lessonRepository.save(folderLesson);
+
+        log.info("✅ Updated folder subscription: {} to {}", folderPath, subscriptionRequired);
     }
 
     public Map<String, Object> getFileTreeForAdmin() {

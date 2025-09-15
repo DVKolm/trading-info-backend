@@ -11,19 +11,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-<<<<<<< HEAD
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
-=======
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 
 @Service
 @RequiredArgsConstructor
@@ -31,74 +26,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Transactional
 public class ProgressTrackingService {
 
-<<<<<<< HEAD
-    private final UserProgressRepository userProgressRepository;
-    private final UserRepository userRepository;
-    private final Optional<RedisCacheService> redisCacheService;
-
-    public void trackReadingSession(ReadingSessionDTO session) {
-        User user = userRepository.findByTelegramId(session.telegramId())
-                .orElseGet(() -> createNewUser(session.telegramId()));
-
-        UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), session.lessonPath())
-                .orElseGet(() -> {
-                    UserProgress newProgress = new UserProgress();
-                    newProgress.setUser(user);
-                    newProgress.setLessonPath(session.lessonPath());
-                    newProgress.setVisits(0);
-                    newProgress.setTimeSpent(0);
-                    return newProgress;
-                });
-
-        progress.setTimeSpent(progress.getTimeSpent() + session.activeTime().intValue());
-        progress.setScrollProgress(BigDecimal.valueOf(session.scrollProgress()));
-        progress.setLastVisited(LocalDateTime.now());
-        progress.setVisits(progress.getVisits() + 1);
-
-        userProgressRepository.save(progress);
-        log.info("📊 Tracked reading session for user {} on lesson {}", session.telegramId(), session.lessonPath());
-    }
-
-    public ProgressMetricsDTO getProgressMetrics(Long telegramId, String lessonPath) {
-        UserProgress progress = userProgressRepository.findByTelegramId(telegramId, lessonPath).orElse(null);
-
-        if (progress == null) {
-            return ProgressMetricsDTO.builder()
-                    .timeSpent(0L)
-                    .scrollProgress(0)
-                    .readingSpeed(0.0)
-                    .completionScore(0.0)
-                    .engagementLevel("new")
-                    .visits(0)
-                    .lastVisited(System.currentTimeMillis())
-                    .build();
-        }
-
-        return ProgressMetricsDTO.builder()
-                .timeSpent(progress.getTimeSpent().longValue())
-                .scrollProgress(progress.getScrollProgress().intValue())
-                .readingSpeed(progress.getReadingSpeed().doubleValue())
-                .completionScore(progress.getCompletionScore().doubleValue())
-                .engagementLevel(progress.getEngagementLevel())
-                .visits(progress.getVisits())
-                .lastVisited(progress.getLastVisited().toEpochSecond(java.time.ZoneOffset.UTC) * 1000)
-                .build();
-    }
-
-    public List<UserProgress> getUserProgress(Long telegramId) {
-        User user = userRepository.findByTelegramId(telegramId).orElse(null);
-        if (user == null) {
-            return List.of();
-        }
-        return userProgressRepository.findByUserId(user.getId());
-    }
-
-    private User createNewUser(Long telegramId) {
-        User newUser = new User();
-        newUser.setTelegramId(telegramId);
-        newUser.setCreatedAt(LocalDateTime.now());
-        return userRepository.save(newUser);
-=======
     private final UserRepository userRepository;
     private final UserProgressRepository userProgressRepository;
     private final Optional<RedisCacheService> redisCacheService;
@@ -113,6 +40,25 @@ public class ProgressTrackingService {
     private static final double ENGAGEMENT_MULTIPLIER = 0.2;
     private static final long COMPLETION_TIME_THRESHOLD = 5 * 60 * 1000; // 5 minutes
     private static final int COMPLETION_SCROLL_THRESHOLD = 80;
+
+    /**
+     * Track reading session - backward compatibility method
+     */
+    public void trackReadingSession(ReadingSessionDTO session) {
+        User user = userRepository.findByTelegramId(session.getTelegramId())
+                .orElseGet(() -> createNewUser(session.getTelegramId()));
+
+        UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), session.getLessonPath())
+                .orElseGet(() -> createNewProgress(user, session.getLessonPath()));
+
+        progress.setTimeSpent(progress.getTimeSpent() + session.getActiveTime().intValue());
+        progress.setScrollProgress(BigDecimal.valueOf(session.getScrollProgress()));
+        progress.setLastVisited(LocalDateTime.now());
+        progress.setVisits(progress.getVisits() + 1);
+
+        userProgressRepository.save(progress);
+        log.info("Tracked reading session for user {} on lesson {}", session.getTelegramId(), session.getLessonPath());
+    }
 
     /**
      * Start a new reading session for a user
@@ -274,10 +220,10 @@ public class ProgressTrackingService {
                 .orElseGet(() -> createNewProgress(user, lessonPath));
 
         // Update progress data
-        progress.setTimeSpent(progress.getTimeSpent() + timeSpent);
-        progress.setScrollProgress(scrollProgress);
-        progress.setReadingSpeed(readingSpeed);
-        progress.setCompletionScore(completionScore);
+        progress.setTimeSpent(progress.getTimeSpent() + (int)timeSpent);
+        progress.setScrollProgress(BigDecimal.valueOf(scrollProgress));
+        progress.setReadingSpeed(BigDecimal.valueOf(readingSpeed));
+        progress.setCompletionScore(BigDecimal.valueOf(completionScore));
         progress.setEngagementLevel(engagementLevel);
         progress.setLastVisited(LocalDateTime.now());
 
@@ -300,15 +246,25 @@ public class ProgressTrackingService {
         UserProgress progress = new UserProgress();
         progress.setUser(user);
         progress.setLessonPath(lessonPath);
-        progress.setTimeSpent(0L);
-        progress.setScrollProgress(0);
-        progress.setReadingSpeed(0.0);
-        progress.setCompletionScore(0.0);
+        progress.setTimeSpent(0);
+        progress.setScrollProgress(BigDecimal.ZERO);
+        progress.setReadingSpeed(BigDecimal.ZERO);
+        progress.setCompletionScore(BigDecimal.ZERO);
         progress.setEngagementLevel("low");
         progress.setVisits(0);
         progress.setCompleted(false);
         progress.setCreatedAt(LocalDateTime.now());
         return progress;
+    }
+
+    /**
+     * Create new user
+     */
+    private User createNewUser(Long telegramId) {
+        User newUser = new User();
+        newUser.setTelegramId(telegramId);
+        newUser.setCreatedAt(LocalDateTime.now());
+        return userRepository.save(newUser);
     }
 
     /**
@@ -330,22 +286,53 @@ public class ProgressTrackingService {
      */
     public ProgressMetricsDTO getProgressMetrics(Long telegramId, String lessonPath) {
         User user = userRepository.findByTelegramId(telegramId).orElse(null);
-        if (user == null) return null;
+        if (user == null) {
+            return ProgressMetricsDTO.builder()
+                    .timeSpent(0L)
+                    .scrollProgress(0)
+                    .readingSpeed(0.0)
+                    .completionScore(0.0)
+                    .engagementLevel("new")
+                    .visits(0)
+                    .lastVisited(System.currentTimeMillis())
+                    .build();
+        }
 
         UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), lessonPath)
                 .orElse(null);
 
-        if (progress == null) return null;
+        if (progress == null) {
+            return ProgressMetricsDTO.builder()
+                    .timeSpent(0L)
+                    .scrollProgress(0)
+                    .readingSpeed(0.0)
+                    .completionScore(0.0)
+                    .engagementLevel("new")
+                    .visits(0)
+                    .lastVisited(System.currentTimeMillis())
+                    .build();
+        }
 
         return ProgressMetricsDTO.builder()
-                .timeSpent(progress.getTimeSpent())
-                .scrollProgress(progress.getScrollProgress())
-                .readingSpeed(progress.getReadingSpeed())
-                .completionScore(progress.getCompletionScore())
+                .timeSpent(progress.getTimeSpent().longValue())
+                .scrollProgress(progress.getScrollProgress().intValue())
+                .readingSpeed(progress.getReadingSpeed().doubleValue())
+                .completionScore(progress.getCompletionScore().doubleValue())
                 .engagementLevel(progress.getEngagementLevel())
                 .visits(progress.getVisits())
                 .lastVisited(progress.getLastVisited().toInstant(ZoneOffset.UTC).toEpochMilli())
                 .build();
+    }
+
+    /**
+     * Get all user progress records
+     */
+    public List<UserProgress> getUserProgress(Long telegramId) {
+        User user = userRepository.findByTelegramId(telegramId).orElse(null);
+        if (user == null) {
+            return List.of();
+        }
+        return userProgressRepository.findByUserId(user.getId());
     }
 
     /**
@@ -369,6 +356,5 @@ public class ProgressTrackingService {
 
     private String generateSessionKey(Long telegramId, String lessonPath) {
         return telegramId + "_" + lessonPath;
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
     }
 }

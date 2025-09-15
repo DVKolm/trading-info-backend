@@ -25,7 +25,7 @@ public class ProgressController {
     @PostMapping("/track")
     public ResponseEntity<Map<String, String>> trackReadingSession(
             @RequestBody ReadingSessionDTO session) {
-        log.info("📊 Tracking reading session for user {}", session.telegramId());
+        log.info("📊 Tracking reading session for user {}", session.getTelegramId());
         progressTrackingService.trackReadingSession(session);
         return ResponseEntity.ok(Map.of("status", "success"));
     }

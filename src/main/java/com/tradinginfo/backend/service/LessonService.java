@@ -196,8 +196,8 @@ public class LessonService {
         User user = userRepository.findByTelegramId(telegramId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found: " + telegramId));
 
-        UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), progressData.getLessonPath())
-                .orElseGet(() -> createNewUserProgress(user, progressData.getLessonPath()));
+        UserProgress progress = userProgressRepository.findByUserIdAndLessonPath(user.getId(), progressData.lessonPath())
+                .orElseGet(() -> createNewUserProgress(user, progressData.lessonPath()));
 
         updateProgressData(progress, progressData);
         userProgressRepository.save(progress);
@@ -223,12 +223,12 @@ public class LessonService {
     }
 
     private void updateProgressData(UserProgress progress, ProgressDTO progressData) {
-        progress.setTimeSpent(progress.getTimeSpent() + progressData.getTimeSpent());
-        progress.setScrollProgress(progressData.getScrollProgress());
-        progress.setReadingSpeed(progressData.getReadingSpeed());
-        progress.setCompletionScore(progressData.getCompletionScore());
-        progress.setEngagementLevel(progressData.getEngagementLevel());
-        progress.setCompleted(progressData.getCompleted());
+        progress.setTimeSpent(progress.getTimeSpent() + progressData.timeSpent());
+        progress.setScrollProgress(progressData.scrollProgress());
+        progress.setReadingSpeed(progressData.readingSpeed());
+        progress.setCompletionScore(progressData.completionScore());
+        progress.setEngagementLevel(progressData.engagementLevel());
+        progress.setCompleted(progressData.completed());
         progress.setLastVisited(LocalDateTime.now());
         progress.setVisits(progress.getVisits() + 1);
     }

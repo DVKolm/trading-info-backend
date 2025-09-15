@@ -292,6 +292,29 @@ public class TelegramBotService {
         }
     }
 
+    /**
+     * Check if user is subscribed to the channel
+     */
+    public boolean checkChannelMembership(Long telegramId) {
+        if (!isBotConfigured()) {
+            log.warn("Bot not configured, cannot check channel membership");
+            return false;
+        }
+
+        try {
+            Map<String, Object> response = webClient.get()
+                    .uri(TELEGRAM_API_URL + botToken + "/getChatMember?chat_id=" + channelId + "&user_id=" + telegramId)
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                    .block();
+
+            return extractSubscriptionStatus(response);
+        } catch (Exception e) {
+            log.error("Error checking channel membership for user {}: {}", telegramId, e.getMessage());
+            return false;
+        }
+    }
+
     private boolean extractSubscriptionStatus(Map<String, Object> response) {
         return Optional.ofNullable(response.get("result"))
                 .filter(Map.class::isInstance)

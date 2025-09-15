@@ -49,6 +49,9 @@ public class UserProgress {
     @Column(name = "completed")
     private Boolean completed = false;
 
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 

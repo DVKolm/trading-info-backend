@@ -1,7 +1,9 @@
 package com.tradinginfo.backend.service;
 
 import com.tradinginfo.backend.dto.SubscriptionStatusDTO;
+import com.tradinginfo.backend.entity.Lesson;
 import com.tradinginfo.backend.entity.User;
+import com.tradinginfo.backend.repository.LessonRepository;
 import com.tradinginfo.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,10 +14,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
-<<<<<<< HEAD
 import java.util.Map;
-=======
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
 import java.util.Optional;
 import java.util.Set;
 
@@ -26,6 +25,7 @@ import java.util.Set;
 public class SubscriptionService {
 
     private final UserRepository userRepository;
+    private final LessonRepository lessonRepository;
     private final Optional<RedisCacheService> redisCacheService;
     private final Optional<TelegramBotService> telegramBotService;
 
@@ -48,6 +48,25 @@ public class SubscriptionService {
             return false;
         }
 
+        // First check if the lesson itself or its parent folder has subscription flag
+        Optional<Lesson> lesson = lessonRepository.findByPath(lessonPath);
+        if (lesson.isPresent()) {
+            // Check if lesson itself requires subscription
+            if (Boolean.TRUE.equals(lesson.get().getSubscriptionRequired())) {
+                return true;
+            }
+
+            // Check if parent folder requires subscription
+            String parentFolder = lesson.get().getParentFolder();
+            if (parentFolder != null) {
+                Optional<Lesson> folder = lessonRepository.findByPath(parentFolder);
+                if (folder.isPresent() && Boolean.TRUE.equals(folder.get().getSubscriptionRequired())) {
+                    return true;
+                }
+            }
+        }
+
+        // Fall back to pattern matching for legacy support
         return PREMIUM_PATTERNS.stream()
                 .anyMatch(pattern -> lessonPath.contains(pattern));
     }
@@ -71,15 +90,9 @@ public class SubscriptionService {
         if (cached.isPresent()) {
             SubscriptionStatusDTO status = cached.get();
             // Check if cache is still valid
-<<<<<<< HEAD
             if (status.verifiedAt() != null) {
                 long minutesSinceVerification = ChronoUnit.MINUTES.between(
                         status.verifiedAt(), LocalDateTime.now()
-=======
-            if (status.getVerifiedAt() != null) {
-                long minutesSinceVerification = ChronoUnit.MINUTES.between(
-                        status.getVerifiedAt(), LocalDateTime.now()
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
                 );
                 if (minutesSinceVerification < SUBSCRIPTION_CACHE_DURATION) {
                     return status;
@@ -226,11 +239,7 @@ public class SubscriptionService {
 
         // Check subscription status
         SubscriptionStatusDTO status = getSubscriptionStatus(telegramId);
-<<<<<<< HEAD
         return status.subscribed();
-=======
-        return status.isSubscribed();
->>>>>>> 5cc626e2d9bce6bd270d1d431747ddff1b1cdb50
     }
 
     /**

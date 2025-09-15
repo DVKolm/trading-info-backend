@@ -54,6 +54,12 @@ public class Lesson {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @Column(name = "is_folder")
+    private Boolean isFolder = false;
+
+    @Column(name = "subscription_required")
+    private Boolean subscriptionRequired = false;
+
     @PreUpdate
     public void preUpdate() {
         updatedAt = LocalDateTime.now();

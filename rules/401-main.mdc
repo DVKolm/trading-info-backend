@@ -1,0 +1,2908 @@
+# Java Development Best Practices Guide
+
+## Table of Contents
+
+1. [Introduction](#introduction)
+2. [Architecture Patterns and Design Principles](#architecture-patterns-and-design-principles)
+   - [SOLID Principles Implementation](#solid-principles-implementation)
+   - [Clean vs Hexagonal Architecture](#clean-vs-hexagonal-architecture)
+   - [Microservices vs Monolithic Decision Matrix](#microservices-vs-monolithic-decision-matrix)
+   - [Event-Driven Architecture Patterns](#event-driven-architecture-patterns)
+   - [CQRS and Event Sourcing](#cqrs-and-event-sourcing)
+   - [Domain-Driven Design with Spring Boot](#domain-driven-design-with-spring-boot)
+   - [API-First Design Principles](#api-first-design-principles)
+3. [Spring Framework Best Practices](#spring-framework-best-practices)
+   - [Spring Boot Configuration Management](#spring-boot-configuration-management)
+   - [Dependency Injection Patterns](#dependency-injection-patterns)
+   - [Transaction Management Strategies](#transaction-management-strategies)
+   - [Spring Security Implementation](#spring-security-implementation)
+   - [Spring Data JPA Optimization](#spring-data-jpa-optimization)
+   - [Reactive Programming with WebFlux](#reactive-programming-with-webflux)
+   - [Spring Cloud Microservices](#spring-cloud-microservices)
+   - [Testing Strategies](#testing-strategies)
+4. [Code Quality and Performance](#code-quality-and-performance)
+   - [Java Streams Best Practices](#java-streams-best-practices)
+   - [Memory Management and GC Optimization](#memory-management-and-gc-optimization)
+   - [Concurrency Patterns](#concurrency-patterns)
+   - [Exception Handling Strategies](#exception-handling-strategies)
+   - [Logging Best Practices](#logging-best-practices)
+   - [Code Review Guidelines](#code-review-guidelines)
+   - [Refactoring Legacy Code](#refactoring-legacy-code)
+5. [Database Integration Patterns](#database-integration-patterns)
+   - [JPA/Hibernate Optimization](#jpahibernate-optimization)
+   - [Connection Pooling](#connection-pooling)
+   - [Database Migrations](#database-migrations)
+   - [Repository Pattern Variations](#repository-pattern-variations)
+   - [Caching Strategies](#caching-strategies)
+   - [Transaction Patterns](#transaction-patterns)
+   - [NoSQL Integration](#nosql-integration)
+6. [DevOps and Deployment Best Practices](#devops-and-deployment-best-practices)
+   - [Docker Containerization](#docker-containerization)
+   - [CI/CD Pipeline Configuration](#cicd-pipeline-configuration)
+   - [Configuration Management](#configuration-management)
+   - [Monitoring and Observability](#monitoring-and-observability)
+   - [Health Checks and Shutdown](#health-checks-and-shutdown)
+   - [Performance Testing](#performance-testing)
+   - [Security Scanning](#security-scanning)
+7. [AI-Assisted Development Best Practices](#ai-assisted-development-best-practices)
+   - [Effective Prompting for Code Generation](#effective-prompting-for-code-generation)
+   - [AI-Powered Code Review](#ai-powered-code-review)
+   - [Debugging with AI Tools](#debugging-with-ai-tools)
+   - [Architecture Decisions with AI](#architecture-decisions-with-ai)
+   - [Requirement Explanation Techniques](#requirement-explanation-techniques)
+   - [Iterative AI Development Workflows](#iterative-ai-development-workflows)
+   - [Quality Assurance for AI-Generated Code](#quality-assurance-for-ai-generated-code)
+8. [Quick Reference Checklists](#quick-reference-checklists)
+9. [Appendix: Tools and Resources](#appendix-tools-and-resources)
+
+---
+
+## Introduction
+
+This comprehensive guide presents modern Java development best practices, focusing on enterprise-grade applications using Java 17+ and the Spring ecosystem. The practices outlined here have been refined through real-world experience in building scalable, maintainable systems that serve millions of users.
+
+The guide emphasizes practical, actionable advice with working code examples. Each pattern and practice is presented with its trade-offs, helping you make informed decisions based on your specific context. Special attention is given to modern development practices, including AI-assisted development workflows that are increasingly becoming part of the developer's toolkit.
+
+---
+
+## Architecture Patterns and Design Principles
+
+### SOLID Principles Implementation
+
+The SOLID principles form the foundation of maintainable object-oriented design. In Java applications, these principles guide us toward creating flexible, testable code that can evolve with changing requirements.
+
+#### Single Responsibility Principle (SRP)
+
+Each class should have only one reason to change. In practice, this means separating concerns into distinct components.
+
+```java
+// Bad: Multiple responsibilities
+public class UserService {
+    public void createUser(UserDto dto) {
+        // Validation logic
+        if (dto.getEmail() == null || !dto.getEmail().contains("@")) {
+            throw new ValidationException("Invalid email");
+        }
+        
+        // Business logic
+        User user = new User(dto.getName(), dto.getEmail());
+        
+        // Persistence logic
+        String sql = "INSERT INTO users (name, email) VALUES (?, ?)";
+        jdbcTemplate.update(sql, user.getName(), user.getEmail());
+        
+        // Email notification logic
+        emailService.sendWelcomeEmail(user.getEmail());
+    }
+}
+
+// Good: Separated responsibilities
+@Component
+public class UserValidator {
+    public void validate(UserDto dto) {
+        if (dto.getEmail() == null || !dto.getEmail().contains("@")) {
+            throw new ValidationException("Invalid email");
+        }
+    }
+}
+
+@Repository
+public class UserRepository {
+    private final JdbcTemplate jdbcTemplate;
+    
+    public User save(User user) {
+        String sql = "INSERT INTO users (name, email) VALUES (?, ?)";
+        jdbcTemplate.update(sql, user.getName(), user.getEmail());
+        return user;
+    }
+}
+
+@Service
+@Transactional
+public class UserService {
+    private final UserValidator validator;
+    private final UserRepository repository;
+    private final NotificationService notificationService;
+    
+    public User createUser(UserDto dto) {
+        validator.validate(dto);
+        User user = new User(dto.getName(), dto.getEmail());
+        User savedUser = repository.save(user);
+        notificationService.sendWelcomeNotification(savedUser);
+        return savedUser;
+    }
+}
+```
+
+#### Open-Closed Principle (OCP)
+
+Software entities should be open for extension but closed for modification. Use interfaces and abstract classes to achieve this.
+
+```java
+// Strategy pattern implementing OCP
+public interface PricingStrategy {
+    BigDecimal calculatePrice(Order order);
+}
+
+@Component
+public class RegularPricingStrategy implements PricingStrategy {
+    @Override
+    public BigDecimal calculatePrice(Order order) {
+        return order.getItems().stream()
+            .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+}
+
+@Component
+public class PremiumPricingStrategy implements PricingStrategy {
+    private static final BigDecimal DISCOUNT = new BigDecimal("0.15");
+    
+    @Override
+    public BigDecimal calculatePrice(Order order) {
+        BigDecimal total = order.getItems().stream()
+            .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return total.multiply(BigDecimal.ONE.subtract(DISCOUNT));
+    }
+}
+
+@Service
+public class PricingService {
+    private final Map<CustomerType, PricingStrategy> strategies;
+    
+    public PricingService(List<PricingStrategy> strategies) {
+        this.strategies = strategies.stream()
+            .collect(Collectors.toMap(
+                strategy -> extractCustomerType(strategy),
+                Function.identity()
+            ));
+    }
+    
+    public BigDecimal calculateOrderPrice(Order order, CustomerType customerType) {
+        return strategies.get(customerType).calculatePrice(order);
+    }
+}
+```
+
+#### Liskov Substitution Principle (LSP)
+
+Derived classes must be substitutable for their base classes without altering the correctness of the program.
+
+```java
+// Bad: Violates LSP
+public class Rectangle {
+    protected int width;
+    protected int height;
+    
+    public void setWidth(int width) {
+        this.width = width;
+    }
+    
+    public void setHeight(int height) {
+        this.height = height;
+    }
+    
+    public int getArea() {
+        return width * height;
+    }
+}
+
+public class Square extends Rectangle {
+    @Override
+    public void setWidth(int width) {
+        this.width = width;
+        this.height = width; // Forces square constraint
+    }
+    
+    @Override
+    public void setHeight(int height) {
+        this.width = height;
+        this.height = height; // Forces square constraint
+    }
+}
+
+// Good: Respects LSP with proper abstraction
+public interface Shape {
+    int getArea();
+}
+
+public final class Rectangle implements Shape {
+    private final int width;
+    private final int height;
+    
+    public Rectangle(int width, int height) {
+        this.width = width;
+        this.height = height;
+    }
+    
+    @Override
+    public int getArea() {
+        return width * height;
+    }
+}
+
+public final class Square implements Shape {
+    private final int side;
+    
+    public Square(int side) {
+        this.side = side;
+    }
+    
+    @Override
+    public int getArea() {
+        return side * side;
+    }
+}
+```
+
+#### Interface Segregation Principle (ISP)
+
+Clients should not be forced to depend on interfaces they don't use. Create focused, cohesive interfaces.
+
+```java
+// Bad: Fat interface
+public interface UserOperations {
+    void createUser(UserDto dto);
+    void updateUser(Long id, UserDto dto);
+    void deleteUser(Long id);
+    List<User> searchUsers(String query);
+    void resetPassword(Long userId);
+    void enableTwoFactor(Long userId);
+    UserStatistics getStatistics(Long userId);
+}
+
+// Good: Segregated interfaces
+public interface UserCrudOperations {
+    User createUser(UserDto dto);
+    User updateUser(Long id, UserDto dto);
+    void deleteUser(Long id);
+}
+
+public interface UserSearchOperations {
+    List<User> searchUsers(String query);
+    Page<User> findUsers(Pageable pageable);
+}
+
+public interface UserSecurityOperations {
+    void resetPassword(Long userId);
+    void enableTwoFactor(Long userId);
+    void revokeTokens(Long userId);
+}
+
+public interface UserAnalyticsOperations {
+    UserStatistics getStatistics(Long userId);
+    List<UserActivity> getRecentActivity(Long userId);
+}
+
+@Service
+public class UserService implements UserCrudOperations, UserSearchOperations {
+    // Implementation focused on core user operations
+}
+
+@Service
+public class UserSecurityService implements UserSecurityOperations {
+    // Implementation focused on security concerns
+}
+```
+
+#### Dependency Inversion Principle (DIP)
+
+High-level modules should not depend on low-level modules. Both should depend on abstractions.
+
+```java
+// Bad: Direct dependency on concrete implementation
+public class OrderService {
+    private final MySQLOrderRepository repository = new MySQLOrderRepository();
+    
+    public void processOrder(Order order) {
+        repository.save(order);
+    }
+}
+
+// Good: Dependency on abstraction
+public interface OrderRepository {
+    Order save(Order order);
+    Optional<Order> findById(Long id);
+}
+
+@Repository
+public class JpaOrderRepository implements OrderRepository {
+    private final EntityManager entityManager;
+    
+    @Override
+    public Order save(Order order) {
+        return entityManager.merge(order);
+    }
+    
+    @Override
+    public Optional<Order> findById(Long id) {
+        return Optional.ofNullable(entityManager.find(Order.class, id));
+    }
+}
+
+@Service
+public class OrderService {
+    private final OrderRepository repository;
+    private final PaymentGateway paymentGateway;
+    
+    // Dependencies injected via constructor
+    public OrderService(OrderRepository repository, PaymentGateway paymentGateway) {
+        this.repository = repository;
+        this.paymentGateway = paymentGateway;
+    }
+    
+    public Order processOrder(Order order) {
+        paymentGateway.processPayment(order.getPaymentDetails());
+        return repository.save(order);
+    }
+}
+```
+
+### Clean vs Hexagonal Architecture
+
+Both Clean Architecture and Hexagonal Architecture promote separation of concerns and dependency inversion, but they have different focuses and implementation approaches.
+
+#### Clean Architecture Implementation
+
+Clean Architecture organizes code in concentric layers with dependencies pointing inward.
+
+```java
+// Domain Layer (innermost) - Enterprise Business Rules
+@Entity
+public class Product {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String name;
+    private BigDecimal price;
+    private Integer stock;
+    
+    public void reduceStock(int quantity) {
+        if (stock < quantity) {
+            throw new InsufficientStockException("Not enough stock");
+        }
+        stock -= quantity;
+    }
+    
+    public boolean isAvailable() {
+        return stock > 0;
+    }
+}
+
+// Use Case Layer - Application Business Rules
+public interface ManageProductUseCase {
+    ProductResponse createProduct(CreateProductRequest request);
+    ProductResponse updateStock(Long productId, int quantity);
+}
+
+@Component
+public class ManageProductUseCaseImpl implements ManageProductUseCase {
+    private final ProductRepository repository;
+    private final ProductMapper mapper;
+    
+    @Override
+    public ProductResponse createProduct(CreateProductRequest request) {
+        Product product = mapper.toDomain(request);
+        Product saved = repository.save(product);
+        return mapper.toResponse(saved);
+    }
+    
+    @Override
+    public ProductResponse updateStock(Long productId, int quantity) {
+        Product product = repository.findById(productId)
+            .orElseThrow(() -> new ProductNotFoundException(productId));
+        product.reduceStock(quantity);
+        Product updated = repository.save(product);
+        return mapper.toResponse(updated);
+    }
+}
+
+// Interface Adapters Layer - Controllers, Presenters, Gateways
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+    private final ManageProductUseCase useCase;
+    
+    @PostMapping
+    public ResponseEntity<ProductResponse> createProduct(@RequestBody @Valid CreateProductRequest request) {
+        ProductResponse response = useCase.createProduct(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+    
+    @PutMapping("/{id}/stock")
+    public ResponseEntity<ProductResponse> updateStock(
+            @PathVariable Long id,
+            @RequestParam int quantity) {
+        ProductResponse response = useCase.updateStock(id, quantity);
+        return ResponseEntity.ok(response);
+    }
+}
+
+// Infrastructure Layer - Database, External Services
+@Repository
+public class JpaProductRepository implements ProductRepository {
+    private final ProductJpaRepository jpaRepository;
+    
+    @Override
+    public Product save(Product product) {
+        return jpaRepository.save(product);
+    }
+    
+    @Override
+    public Optional<Product> findById(Long id) {
+        return jpaRepository.findById(id);
+    }
+}
+```
+
+#### Hexagonal Architecture Implementation
+
+Hexagonal Architecture (Ports and Adapters) focuses on isolating the core business logic from external concerns.
+
+```java
+// Domain Core
+@Component
+public class OrderService {
+    private final OrderRepository orderRepository; // Port
+    private final PaymentGateway paymentGateway;   // Port
+    private final NotificationSender notificationSender; // Port
+    
+    public Order placeOrder(OrderRequest request) {
+        Order order = Order.create(request);
+        
+        PaymentResult paymentResult = paymentGateway.processPayment(
+            order.getTotalAmount(),
+            request.getPaymentMethod()
+        );
+        
+        if (!paymentResult.isSuccessful()) {
+            throw new PaymentFailedException(paymentResult.getReason());
+        }
+        
+        order.confirmPayment(paymentResult.getTransactionId());
+        Order savedOrder = orderRepository.save(order);
+        
+        notificationSender.sendOrderConfirmation(savedOrder);
+        
+        return savedOrder;
+    }
+}
+
+// Port Definitions
+public interface OrderRepository {
+    Order save(Order order);
+    Optional<Order> findById(OrderId id);
+}
+
+public interface PaymentGateway {
+    PaymentResult processPayment(BigDecimal amount, PaymentMethod method);
+}
+
+public interface NotificationSender {
+    void sendOrderConfirmation(Order order);
+}
+
+// Adapter Implementations
+@Component
+public class JpaOrderAdapter implements OrderRepository {
+    private final OrderJpaRepository jpaRepository;
+    
+    @Override
+    public Order save(Order order) {
+        OrderEntity entity = OrderMapper.toEntity(order);
+        OrderEntity saved = jpaRepository.save(entity);
+        return OrderMapper.toDomain(saved);
+    }
+}
+
+@Component
+public class StripePaymentAdapter implements PaymentGateway {
+    private final StripeClient stripeClient;
+    
+    @Override
+    public PaymentResult processPayment(BigDecimal amount, PaymentMethod method) {
+        try {
+            ChargeCreateParams params = ChargeCreateParams.builder()
+                .setAmount(amount.multiply(BigDecimal.valueOf(100)).longValue())
+                .setCurrency("USD")
+                .setSource(method.getToken())
+                .build();
+            
+            Charge charge = stripeClient.charges().create(params);
+            
+            return PaymentResult.success(charge.getId());
+        } catch (StripeException e) {
+            return PaymentResult.failure(e.getMessage());
+        }
+    }
+}
+
+@Component
+public class EmailNotificationAdapter implements NotificationSender {
+    private final JavaMailSender mailSender;
+    
+    @Override
+    public void sendOrderConfirmation(Order order) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(order.getCustomerEmail());
+        message.setSubject("Order Confirmation #" + order.getId());
+        message.setText(buildOrderConfirmationText(order));
+        mailSender.send(message);
+    }
+}
+```
+
+### Microservices vs Monolithic Decision Matrix
+
+Choosing between microservices and monolithic architecture is a critical decision that impacts development velocity, operational complexity, and system scalability.
+
+#### Decision Matrix
+
+| Factor | Monolithic | Microservices |
+|--------|------------|---------------|
+| **Team Size** | Small to Medium (< 20 devs) | Large (> 20 devs), multiple teams |
+| **Domain Complexity** | Simple to Moderate | Complex with clear bounded contexts |
+| **Scalability Needs** | Uniform scaling | Selective component scaling |
+| **Development Speed** | Fast initial development | Slower initial, faster for parallel work |
+| **Deployment Complexity** | Simple, single artifact | Complex, orchestration required |
+| **Data Consistency** | ACID transactions | Eventual consistency, saga patterns |
+| **Technology Diversity** | Single tech stack | Polyglot possible |
+| **Operational Overhead** | Low | High (monitoring, tracing, service mesh) |
+| **Testing Complexity** | Simpler integration tests | Complex, contract testing required |
+| **Latency** | Low, in-process calls | Higher, network overhead |
+
+#### Modular Monolith Pattern
+
+A modular monolith provides a middle ground, offering better organization without microservices complexity.
+
+```java
+// Module structure using Spring Boot
+// user-module/src/main/java/com/example/user/
+@Configuration
+@ComponentScan(basePackages = "com.example.user")
+public class UserModuleConfiguration {
+    
+    @Bean
+    public UserFacade userFacade(UserRepository repository, EventPublisher eventPublisher) {
+        return new UserFacade(repository, eventPublisher);
+    }
+}
+
+// Public API of the module
+public class UserFacade {
+    private final UserRepository repository;
+    private final EventPublisher eventPublisher;
+    
+    public UserDto createUser(CreateUserCommand command) {
+        User user = User.create(command);
+        User saved = repository.save(user);
+        
+        eventPublisher.publish(new UserCreatedEvent(saved.getId(), saved.getEmail()));
+        
+        return UserMapper.toDto(saved);
+    }
+    
+    public Optional<UserDto> findUser(UserId userId) {
+        return repository.findById(userId).map(UserMapper::toDto);
+    }
+}
+
+// order-module/src/main/java/com/example/order/
+@Configuration
+@ComponentScan(basePackages = "com.example.order")
+public class OrderModuleConfiguration {
+    
+    @Bean
+    public OrderFacade orderFacade(
+            OrderRepository repository,
+            UserFacade userFacade) { // Direct dependency on user module's facade
+        return new OrderFacade(repository, userFacade);
+    }
+}
+
+public class OrderFacade {
+    private final OrderRepository repository;
+    private final UserFacade userFacade;
+    
+    public OrderDto createOrder(CreateOrderCommand command) {
+        // Validate user exists
+        UserDto user = userFacade.findUser(command.getUserId())
+            .orElseThrow(() -> new UserNotFoundException(command.getUserId()));
+        
+        Order order = Order.create(command, user);
+        Order saved = repository.save(order);
+        
+        return OrderMapper.toDto(saved);
+    }
+}
+```
+
+### Event-Driven Architecture Patterns
+
+Event-driven architecture enables loose coupling between components and supports scalable, resilient systems.
+
+#### Event Types and Implementation
+
+```java
+// Domain Events
+public abstract class DomainEvent {
+    private final Instant occurredAt;
+    private final String aggregateId;
+    
+    protected DomainEvent(String aggregateId) {
+        this.aggregateId = aggregateId;
+        this.occurredAt = Instant.now();
+    }
+}
+
+@Value
+public class OrderPlacedEvent extends DomainEvent {
+    String orderId;
+    String customerId;
+    BigDecimal totalAmount;
+    List<OrderItem> items;
+    
+    public OrderPlacedEvent(String orderId, String customerId, BigDecimal totalAmount, List<OrderItem> items) {
+        super(orderId);
+        this.orderId = orderId;
+        this.customerId = customerId;
+        this.totalAmount = totalAmount;
+        this.items = items;
+    }
+}
+
+// Event Publisher
+@Component
+public class SpringEventPublisher implements EventPublisher {
+    private final ApplicationEventPublisher applicationEventPublisher;
+    
+    @Override
+    public void publish(DomainEvent event) {
+        applicationEventPublisher.publishEvent(event);
+    }
+}
+
+// Event Handlers
+@Component
+@Slf4j
+public class InventoryEventHandler {
+    private final InventoryService inventoryService;
+    
+    @EventListener
+    @Async
+    public void handleOrderPlaced(OrderPlacedEvent event) {
+        log.info("Processing inventory for order: {}", event.getOrderId());
+        
+        try {
+            for (OrderItem item : event.getItems()) {
+                inventoryService.reduceStock(item.getProductId(), item.getQuantity());
+            }
+        } catch (InsufficientStockException e) {
+            // Publish compensation event
+            publishOrderCancellationEvent(event.getOrderId(), e.getMessage());
+        }
+    }
+    
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleOrderPlacedAfterCommit(OrderPlacedEvent event) {
+        // Actions that should only occur after successful transaction
+        notificationService.sendOrderConfirmation(event);
+    }
+}
+
+// Event Sourcing Implementation
+@Entity
+@Table(name = "event_store")
+public class EventEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    private String aggregateId;
+    private String eventType;
+    
+    @Lob
+    private String eventData;
+    
+    private Instant occurredAt;
+    private Long version;
+}
+
+@Repository
+public class EventStore {
+    private final EventEntityRepository repository;
+    private final ObjectMapper objectMapper;
+    
+    public void save(DomainEvent event) {
+        EventEntity entity = new EventEntity();
+        entity.setAggregateId(event.getAggregateId());
+        entity.setEventType(event.getClass().getName());
+        entity.setEventData(objectMapper.writeValueAsString(event));
+        entity.setOccurredAt(event.getOccurredAt());
+        
+        repository.save(entity);
+    }
+    
+    public List<DomainEvent> getEvents(String aggregateId) {
+        return repository.findByAggregateIdOrderByVersion(aggregateId)
+            .stream()
+            .map(this::deserialize)
+            .collect(Collectors.toList());
+    }
+}
+```
+
+### CQRS and Event Sourcing
+
+CQRS (Command Query Responsibility Segregation) separates read and write models, while Event Sourcing stores state as a sequence of events.
+
+```java
+// Command Side
+public interface Command {
+    String getAggregateId();
+}
+
+@Value
+public class CreateOrderCommand implements Command {
+    String orderId;
+    String customerId;
+    List<OrderItemDto> items;
+    
+    @Override
+    public String getAggregateId() {
+        return orderId;
+    }
+}
+
+@Component
+public class OrderCommandHandler {
+    private final EventStore eventStore;
+    
+    @Transactional
+    public void handle(CreateOrderCommand command) {
+        // Load aggregate from event store
+        Order order = loadOrCreateAggregate(command.getOrderId());
+        
+        // Execute business logic
+        order.place(command.getCustomerId(), command.getItems());
+        
+        // Save events
+        order.getUncommittedEvents().forEach(eventStore::save);
+        order.markEventsAsCommitted();
+    }
+    
+    private Order loadOrCreateAggregate(String orderId) {
+        List<DomainEvent> events = eventStore.getEvents(orderId);
+        Order order = new Order(orderId);
+        events.forEach(order::apply);
+        return order;
+    }
+}
+
+// Aggregate with Event Sourcing
+public class Order {
+    private String id;
+    private String customerId;
+    private List<OrderItem> items;
+    private OrderStatus status;
+    private final List<DomainEvent> uncommittedEvents = new ArrayList<>();
+    
+    public Order(String id) {
+        this.id = id;
+    }
+    
+    public void place(String customerId, List<OrderItemDto> items) {
+        if (status != null) {
+            throw new IllegalStateException("Order already placed");
+        }
+        
+        OrderPlacedEvent event = new OrderPlacedEvent(
+            id, 
+            customerId, 
+            calculateTotal(items), 
+            items
+        );
+        
+        apply(event);
+        uncommittedEvents.add(event);
+    }
+    
+    public void apply(DomainEvent event) {
+        if (event instanceof OrderPlacedEvent) {
+            OrderPlacedEvent e = (OrderPlacedEvent) event;
+            this.customerId = e.getCustomerId();
+            this.items = e.getItems();
+            this.status = OrderStatus.PLACED;
+        } else if (event instanceof OrderShippedEvent) {
+            this.status = OrderStatus.SHIPPED;
+        }
+        // Handle other events...
+    }
+    
+    public List<DomainEvent> getUncommittedEvents() {
+        return new ArrayList<>(uncommittedEvents);
+    }
+    
+    public void markEventsAsCommitted() {
+        uncommittedEvents.clear();
+    }
+}
+
+// Query Side - Read Model
+@Entity
+@Table(name = "order_projections")
+public class OrderProjection {
+    @Id
+    private String orderId;
+    private String customerId;
+    private String customerName;
+    private BigDecimal totalAmount;
+    private OrderStatus status;
+    private Instant createdAt;
+    
+    @ElementCollection
+    private List<OrderItemProjection> items;
+}
+
+@Component
+public class OrderProjectionHandler {
+    private final OrderProjectionRepository repository;
+    
+    @EventListener
+    public void on(OrderPlacedEvent event) {
+        OrderProjection projection = new OrderProjection();
+        projection.setOrderId(event.getOrderId());
+        projection.setCustomerId(event.getCustomerId());
+        projection.setTotalAmount(event.getTotalAmount());
+        projection.setStatus(OrderStatus.PLACED);
+        projection.setCreatedAt(event.getOccurredAt());
+        projection.setItems(mapItems(event.getItems()));
+        
+        repository.save(projection);
+    }
+    
+    @EventListener
+    public void on(OrderShippedEvent event) {
+        repository.findById(event.getOrderId())
+            .ifPresent(projection -> {
+                projection.setStatus(OrderStatus.SHIPPED);
+                repository.save(projection);
+            });
+    }
+}
+
+// Query Service
+@Service
+public class OrderQueryService {
+    private final OrderProjectionRepository repository;
+    
+    public Page<OrderProjection> findOrdersByCustomer(String customerId, Pageable pageable) {
+        return repository.findByCustomerId(customerId, pageable);
+    }
+    
+    public Optional<OrderProjection> findOrder(String orderId) {
+        return repository.findById(orderId);
+    }
+}
+```
+
+### Domain-Driven Design with Spring Boot
+
+DDD helps manage complex business logic by organizing code around the business domain.
+
+```java
+// Value Objects
+@Embeddable
+@Value
+public class Money {
+    @Column(name = "amount")
+    BigDecimal amount;
+    
+    @Column(name = "currency")
+    Currency currency;
+    
+    public Money add(Money other) {
+        if (!currency.equals(other.currency)) {
+            throw new IllegalArgumentException("Cannot add different currencies");
+        }
+        return new Money(amount.add(other.amount), currency);
+    }
+    
+    public Money multiply(int quantity) {
+        return new Money(amount.multiply(BigDecimal.valueOf(quantity)), currency);
+    }
+}
+
+@Embeddable
+@Value
+public class Address {
+    String street;
+    String city;
+    String zipCode;
+    String country;
+    
+    public String getFullAddress() {
+        return String.format("%s, %s, %s %s", street, city, zipCode, country);
+    }
+}
+
+// Entities
+@Entity
+@Table(name = "customers")
+public class Customer {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Embedded
+    private CustomerName name;
+    
+    @Embedded
+    private Address shippingAddress;
+    
+    @Embedded
+    private Address billingAddress;
+    
+    @Enumerated(EnumType.STRING)
+    private CustomerType type;
+    
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<PaymentMethod> paymentMethods = new ArrayList<>();
+    
+    public void upgradetoPremium() {
+        if (type == CustomerType.PREMIUM) {
+            throw new DomainException("Customer is already premium");
+        }
+        type = CustomerType.PREMIUM;
+        // Publish domain event
+        DomainEvents.raise(new CustomerUpgradedEvent(id));
+    }
+    
+    public void addPaymentMethod(PaymentMethod method) {
+        if (paymentMethods.size() >= 5) {
+            throw new DomainException("Maximum payment methods reached");
+        }
+        paymentMethods.add(method);
+    }
+}
+
+// Aggregate Root
+@Entity
+@Table(name = "orders")
+public class Order extends AbstractAggregateRoot<Order> {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @ManyToOne
+    private Customer customer;
+    
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    @JoinColumn(name = "order_id")
+    private List<OrderLine> orderLines = new ArrayList<>();
+    
+    @Embedded
+    private Money totalAmount;
+    
+    @Enumerated(EnumType.STRING)
+    private OrderStatus status;
+    
+    private Instant placedAt;
+    
+    // Factory method
+    public static Order create(Customer customer) {
+        Order order = new Order();
+        order.customer = customer;
+        order.status = OrderStatus.DRAFT;
+        order.totalAmount = Money.zero(Currency.USD);
+        return order;
+    }
+    
+    public void addItem(Product product, int quantity) {
+        if (status != OrderStatus.DRAFT) {
+            throw new DomainException("Cannot modify confirmed order");
+        }
+        
+        OrderLine line = OrderLine.create(product, quantity);
+        orderLines.add(line);
+        recalculateTotal();
+    }
+    
+    public void place() {
+        if (orderLines.isEmpty()) {
+            throw new DomainException("Cannot place empty order");
+        }
+        
+        status = OrderStatus.PLACED;
+        placedAt = Instant.now();
+        
+        // Register domain event (Spring Data feature)
+        registerEvent(new OrderPlacedEvent(this));
+    }
+    
+    private void recalculateTotal() {
+        totalAmount = orderLines.stream()
+            .map(OrderLine::getLineTotal)
+            .reduce(Money.zero(Currency.USD), Money::add);
+    }
+}
+
+// Repository with Specifications
+public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
+    
+    @Query("SELECT o FROM Order o WHERE o.customer.id = :customerId AND o.status = :status")
+    List<Order> findByCustomerAndStatus(@Param("customerId") Long customerId, @Param("status") OrderStatus status);
+    
+    default List<Order> findRecentHighValueOrders(Money threshold) {
+        return findAll(Specification.where(OrderSpecifications.placedAfter(Instant.now().minus(30, ChronoUnit.DAYS)))
+            .and(OrderSpecifications.totalAmountGreaterThan(threshold))
+            .and(OrderSpecifications.hasStatus(OrderStatus.PLACED)));
+    }
+}
+
+public class OrderSpecifications {
+    
+    public static Specification<Order> placedAfter(Instant date) {
+        return (root, query, criteriaBuilder) -> 
+            criteriaBuilder.greaterThan(root.get("placedAt"), date);
+    }
+    
+    public static Specification<Order> totalAmountGreaterThan(Money amount) {
+        return (root, query, criteriaBuilder) -> 
+            criteriaBuilder.greaterThan(root.get("totalAmount").get("amount"), amount.getAmount());
+    }
+    
+    public static Specification<Order> hasStatus(OrderStatus status) {
+        return (root, query, criteriaBuilder) -> 
+            criteriaBuilder.equal(root.get("status"), status);
+    }
+}
+
+// Domain Service
+@Service
+public class PricingDomainService {
+    private final TaxCalculator taxCalculator;
+    private final DiscountPolicy discountPolicy;
+    
+    public Money calculateFinalPrice(Order order, Customer customer) {
+        Money subtotal = order.getTotalAmount();
+        Money discount = discountPolicy.calculateDiscount(subtotal, customer);
+        Money afterDiscount = subtotal.subtract(discount);
+        Money tax = taxCalculator.calculate(afterDiscount, customer.getShippingAddress());
+        
+        return afterDiscount.add(tax);
+    }
+}
+```
+
+### API-First Design Principles
+
+API-first design ensures that APIs are designed before implementation, promoting better collaboration and consistency.
+
+```java
+// OpenAPI Specification (api-spec.yaml)
+/*
+openapi: 3.0.0
+info:
+  title: Product API
+  version: 1.0.0
+paths:
+  /products:
+    post:
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+*/
+
+// Generated Interface from OpenAPI
+@Generated(value = "openapi-generator")
+public interface ProductsApi {
+    @PostMapping(value = "/products", produces = "application/json", consumes = "application/json")
+    ResponseEntity<ProductResponse> createProduct(@Valid @RequestBody CreateProductRequest request);
+    
+    @GetMapping(value = "/products/{id}", produces = "application/json")
+    ResponseEntity<ProductResponse> getProduct(@PathVariable("id") Long id);
+}
+
+// Implementation
+@RestController
+@RequestMapping("/api/v1")
+@Slf4j
+public class ProductController implements ProductsApi {
+    private final ProductService productService;
+    
+    @Override
+    public ResponseEntity<ProductResponse> createProduct(@Valid @RequestBody CreateProductRequest request) {
+        log.info("Creating product: {}", request.getName());
+        
+        ProductResponse response = productService.createProduct(request);
+        
+        return ResponseEntity
+            .status(HttpStatus.CREATED)
+            .location(URI.create("/api/v1/products/" + response.getId()))
+            .body(response);
+    }
+    
+    @Override
+    public ResponseEntity<ProductResponse> getProduct(@PathVariable("id") Long id) {
+        return productService.findProduct(id)
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
+    }
+}
+
+// Request/Response DTOs with Validation
+@Data
+@Builder
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+public class CreateProductRequest {
+    @NotBlank(message = "Product name is required")
+    @Size(min = 3, max = 100, message = "Product name must be between 3 and 100 characters")
+    private String name;
+    
+    @NotNull(message = "Price is required")
+    @DecimalMin(value = "0.01", message = "Price must be greater than 0")
+    private BigDecimal price;
+    
+    @NotNull(message = "Category is required")
+    private CategoryDto category;
+    
+    @Valid
+    private List<AttributeDto> attributes;
+}
+
+@Data
+@Builder
+public class ProductResponse {
+    private Long id;
+    private String name;
+    private BigDecimal price;
+    private CategoryDto category;
+    private List<AttributeDto> attributes;
+    private Instant createdAt;
+    private Instant updatedAt;
+    
+    @JsonProperty("_links")
+    private Links links;
+    
+    @Data
+    @Builder
+    public static class Links {
+        private String self;
+        private String update;
+        private String delete;
+    }
+}
+
+// HATEOAS Implementation
+@Component
+public class ProductResourceAssembler {
+    
+    public ProductResponse toResource(Product product) {
+        ProductResponse response = ProductMapper.toResponse(product);
+        
+        ProductResponse.Links links = ProductResponse.Links.builder()
+            .self("/api/v1/products/" + product.getId())
+            .update("/api/v1/products/" + product.getId())
+            .delete("/api/v1/products/" + product.getId())
+            .build();
+        
+        response.setLinks(links);
+        return response;
+    }
+}
+```
+
+---
+
+## Spring Framework Best Practices
+
+### Spring Boot Configuration Management
+
+Effective configuration management is crucial for maintaining applications across different environments.
+
+```java
+// Application Properties with Profiles
+// application.yml
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/myapp}
+    username: ${DATABASE_USER:myapp}
+    password: ${DATABASE_PASSWORD:secret}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: ${DB_MIN_IDLE:2}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT:30000}
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      expiration: ${JWT_EXPIRATION:86400}
+  
+  cache:
+    ttl: ${CACHE_TTL:3600}
+    size: ${CACHE_SIZE:1000}
+
+// Configuration Properties Class
+@Component
+@ConfigurationProperties(prefix = "app.security.jwt")
+@Validated
+public class JwtProperties {
+    @NotBlank
+    private String secret;
+    
+    @Min(3600)
+    private Long expiration;
+    
+    // Getters and setters with validation
+}
+
+// Custom Configuration
+@Configuration
+@ConditionalOnProperty(name = "app.features.advanced-monitoring", havingValue = "true")
+public class MonitoringConfiguration {
+    
+    @Bean
+    @ConditionalOnMissingBean
+    public MeterRegistry meterRegistry() {
+        return new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+    }
+    
+    @Bean
+    @Profile("!test")
+    public HealthIndicator customHealthIndicator(DataSource dataSource) {
+        return new DatabaseHealthIndicator(dataSource);
+    }
+}
+
+// Environment-specific Configuration
+@Configuration
+@Profile("production")
+public class ProductionConfiguration {
+    
+    @Bean
+    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new Jackson2JsonRedisSerializer<>(Object.class));
+        return template;
+    }
+    
+    @Bean
+    public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(60))
+            .disableCachingNullValues();
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(config)
+            .build();
+    }
+}
+```
+
+### Dependency Injection Patterns
+
+Spring's dependency injection should be used thoughtfully to maintain clean, testable code.
+
+```java
+// Constructor Injection (Preferred)
+@Service
+@RequiredArgsConstructor // Lombok
+public class OrderService {
+    private final OrderRepository orderRepository;
+    private final PaymentService paymentService;
+    private final NotificationService notificationService;
+    
+    public Order processOrder(OrderRequest request) {
+        Order order = createOrder(request);
+        paymentService.processPayment(order);
+        notificationService.sendConfirmation(order);
+        return orderRepository.save(order);
+    }
+}
+
+// Conditional Beans
+@Configuration
+public class ServiceConfiguration {
+    
+    @Bean
+    @ConditionalOnProperty(name = "payment.provider", havingValue = "stripe")
+    public PaymentService stripePaymentService() {
+        return new StripePaymentService();
+    }
+    
+    @Bean
+    @ConditionalOnProperty(name = "payment.provider", havingValue = "paypal")
+    public PaymentService paypalPaymentService() {
+        return new PayPalPaymentService();
+    }
+    
+    @Bean
+    @Primary
+    @ConditionalOnMissingBean(PaymentService.class)
+    public PaymentService defaultPaymentService() {
+        return new MockPaymentService();
+    }
+}
+
+// Qualifier for Multiple Implementations
+@Service
+public class NotificationOrchestrator {
+    private final Map<NotificationType, NotificationSender> senders;
+    
+    public NotificationOrchestrator(
+            @Qualifier("email") NotificationSender emailSender,
+            @Qualifier("sms") NotificationSender smsSender,
+            @Qualifier("push") NotificationSender pushSender) {
+        
+        this.senders = Map.of(
+            NotificationType.EMAIL, emailSender,
+            NotificationType.SMS, smsSender,
+            NotificationType.PUSH, pushSender
+        );
+    }
+    
+    public void send(Notification notification) {
+        NotificationSender sender = senders.get(notification.getType());
+        if (sender == null) {
+            throw new UnsupportedNotificationTypeException(notification.getType());
+        }
+        sender.send(notification);
+    }
+}
+
+// Custom Scope
+@Component
+@Scope(value = WebApplicationContext.SCOPE_REQUEST, proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class RequestContext {
+    private String correlationId;
+    private String userId;
+    private Instant requestTime;
+    
+    @PostConstruct
+    public void init() {
+        this.correlationId = UUID.randomUUID().toString();
+        this.requestTime = Instant.now();
+    }
+}
+```
+
+### Transaction Management Strategies
+
+Proper transaction management ensures data consistency and optimal performance.
+
+```java
+// Declarative Transaction Management
+@Service
+@Transactional(readOnly = true)
+public class ProductService {
+    private final ProductRepository productRepository;
+    private final AuditService auditService;
+    
+    public List<Product> findAll() {
+        return productRepository.findAll(); // Read-only transaction
+    }
+    
+    @Transactional(
+        propagation = Propagation.REQUIRED,
+        isolation = Isolation.READ_COMMITTED,
+        timeout = 30,
+        rollbackFor = Exception.class
+    )
+    public Product updateProduct(Long id, UpdateProductRequest request) {
+        Product product = productRepository.findById(id)
+            .orElseThrow(() -> new ProductNotFoundException(id));
+        
+        product.update(request);
+        Product updated = productRepository.save(product);
+        
+        auditService.logUpdate(product); // Participates in same transaction
+        
+        return updated;
+    }
+    
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void processInNewTransaction(Long productId) {
+        // Always runs in a new transaction
+        Product product = productRepository.findById(productId).orElseThrow();
+        product.process();
+        productRepository.save(product);
+    }
+}
+
+// Programmatic Transaction Management
+@Component
+public class BatchProcessor {
+    private final PlatformTransactionManager transactionManager;
+    private final ProductRepository productRepository;
+    
+    public void processBatch(List<Product> products) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        
+        for (Product product : products) {
+            try {
+                transactionTemplate.execute(status -> {
+                    product.process();
+                    productRepository.save(product);
+                    return null;
+                });
+            } catch (Exception e) {
+                log.error("Failed to process product: {}", product.getId(), e);
+                // Continue with next product
+            }
+        }
+    }
+}
+
+// Transaction Event Listeners
+@Component
+public class OrderEventListener {
+    
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    public void beforeCommit(OrderCreatedEvent event) {
+        // Executes before transaction commit
+        // Good for validation or additional updates
+        validateInventory(event.getOrder());
+    }
+    
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void afterCommit(OrderCreatedEvent event) {
+        // Executes after successful commit
+        // Good for external system notifications
+        sendOrderConfirmation(event.getOrder());
+    }
+    
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_ROLLBACK)
+    public void afterRollback(OrderCreatedEvent event) {
+        // Executes if transaction rolled back
+        // Good for cleanup or compensating actions
+        releaseReservedInventory(event.getOrder());
+    }
+}
+```
+
+### Spring Security Implementation
+
+Security should be implemented in layers with defense in depth principles.
+
+```java
+// Security Configuration
+@Configuration
+@EnableWebSecurity
+@EnableGlobalMethodSecurity(prePostEnabled = true)
+public class SecurityConfiguration {
+    
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        return http
+            .csrf(csrf -> csrf
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .ignoringRequestMatchers("/api/webhooks/**")
+            )
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/public/**").permitAll()
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
+                .anyRequest().authenticated()
+            )
+            .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class)
+            .exceptionHandling(exception -> exception
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                .accessDeniedHandler(customAccessDeniedHandler())
+            )
+            .build();
+    }
+    
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12);
+    }
+    
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.asList("https://app.example.com"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setAllowCredentials(true);
+        
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", configuration);
+        return source;
+    }
+}
+
+// JWT Authentication Filter
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    private final JwtTokenProvider tokenProvider;
+    private final UserDetailsService userDetailsService;
+    
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, 
+                                  HttpServletResponse response, 
+                                  FilterChain filterChain) throws ServletException, IOException {
+        
+        String token = extractToken(request);
+        
+        if (token != null && tokenProvider.validateToken(token)) {
+            String username = tokenProvider.getUsername(token);
+            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            
+            UsernamePasswordAuthenticationToken authentication = 
+                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+            
+            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+        }
+        
+        filterChain.doFilter(request, response);
+    }
+    
+    private String extractToken(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
+}
+
+// Method Security
+@Service
+public class DocumentService {
+    
+    @PreAuthorize("hasRole('USER')")
+    public Document createDocument(CreateDocumentRequest request) {
+        // Only authenticated users can create documents
+        return documentRepository.save(new Document(request));
+    }
+    
+    @PreAuthorize("@documentSecurity.isOwner(#documentId, authentication.name)")
+    public Document updateDocument(Long documentId, UpdateDocumentRequest request) {
+        // Only document owner can update
+        Document document = findDocument(documentId);
+        document.update(request);
+        return documentRepository.save(document);
+    }
+    
+    @PostAuthorize("returnObject.isPublic() or returnObject.owner == authentication.name")
+    public Document getDocument(Long documentId) {
+        // Return document only if public or owned by user
+        return documentRepository.findById(documentId)
+            .orElseThrow(() -> new DocumentNotFoundException(documentId));
+    }
+}
+
+// Custom Security Expressions
+@Component("documentSecurity")
+public class DocumentSecurity {
+    private final DocumentRepository documentRepository;
+    
+    public boolean isOwner(Long documentId, String username) {
+        return documentRepository.findById(documentId)
+            .map(doc -> doc.getOwner().equals(username))
+            .orElse(false);
+    }
+}
+```
+
+### Spring Data JPA Optimization
+
+Optimizing database access is critical for application performance.
+
+```java
+// Entity Graph for Eager Loading
+@Entity
+@NamedEntityGraph(
+    name = "Order.full",
+    attributeNodes = {
+        @NamedAttributeNode("customer"),
+        @NamedAttributeNode(value = "orderLines", subgraph = "orderLines-subgraph")
+    },
+    subgraphs = {
+        @NamedSubgraph(
+            name = "orderLines-subgraph",
+            attributeNodes = @NamedAttributeNode("product")
+        )
+    }
+)
+public class Order {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    private Customer customer;
+    
+    @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
+    private List<OrderLine> orderLines;
+}
+
+// Repository with Optimized Queries
+@Repository
+public interface OrderRepository extends JpaRepository<Order, Long> {
+    
+    @EntityGraph(value = "Order.full", type = EntityGraph.EntityGraphType.LOAD)
+    List<Order> findByStatus(OrderStatus status);
+    
+    @Query("SELECT o FROM Order o JOIN FETCH o.customer WHERE o.placedAt > :date")
+    List<Order> findRecentOrdersWithCustomer(@Param("date") Instant date);
+    
+    @Modifying
+    @Query("UPDATE Order o SET o.status = :status WHERE o.id IN :ids")
+    int updateStatusBatch(@Param("ids") List<Long> ids, @Param("status") OrderStatus status);
+    
+    // Projection for read-only data
+    @Query("SELECT new com.example.dto.OrderSummary(o.id, o.customer.name, o.totalAmount, o.status) " +
+           "FROM Order o WHERE o.placedAt > :date")
+    List<OrderSummary> findOrderSummaries(@Param("date") Instant date);
+}
+
+// Batch Processing
+@Component
+public class BatchOrderProcessor {
+    private final EntityManager entityManager;
+    
+    @Transactional
+    public void processBatch(List<Order> orders) {
+        int batchSize = 50;
+        
+        for (int i = 0; i < orders.size(); i++) {
+            Order order = orders.get(i);
+            order.process();
+            entityManager.persist(order);
+            
+            if (i % batchSize == 0 && i > 0) {
+                entityManager.flush();
+                entityManager.clear();
+            }
+        }
+    }
+}
+
+// Query by Example
+@Service
+public class ProductSearchService {
+    private final ProductRepository repository;
+    
+    public Page<Product> searchProducts(ProductSearchCriteria criteria, Pageable pageable) {
+        Product probe = new Product();
+        probe.setCategory(criteria.getCategory());
+        probe.setActive(true);
+        
+        ExampleMatcher matcher = ExampleMatcher.matching()
+            .withIgnoreNullValues()
+            .withIgnorePaths("id", "createdAt", "updatedAt")
+            .withStringMatcher(ExampleMatcher.StringMatcher.CONTAINING)
+            .withIgnoreCase();
+        
+        Example<Product> example = Example.of(probe, matcher);
+        return repository.findAll(example, pageable);
+    }
+}
+
+// Custom Repository Implementation
+public interface CustomOrderRepository {
+    List<Order> findComplexOrders(ComplexSearchCriteria criteria);
+}
+
+@Repository
+public class CustomOrderRepositoryImpl implements CustomOrderRepository {
+    private final EntityManager entityManager;
+    
+    @Override
+    public List<Order> findComplexOrders(ComplexSearchCriteria criteria) {
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<Order> query = cb.createQuery(Order.class);
+        Root<Order> order = query.from(Order.class);
+        
+        List<Predicate> predicates = new ArrayList<>();
+        
+        if (criteria.getMinAmount() != null) {
+            predicates.add(cb.greaterThanOrEqualTo(order.get("totalAmount"), criteria.getMinAmount()));
+        }
+        
+        if (criteria.getCustomerType() != null) {
+            Join<Order, Customer> customer = order.join("customer");
+            predicates.add(cb.equal(customer.get("type"), criteria.getCustomerType()));
+        }
+        
+        query.where(predicates.toArray(new Predicate[0]));
+        
+        return entityManager.createQuery(query)
+            .setHint("org.hibernate.cacheable", true)
+            .getResultList();
+    }
+}
+```
+
+### Reactive Programming with WebFlux
+
+Reactive programming enables non-blocking, scalable applications.
+
+```java
+// Reactive Controller
+@RestController
+@RequestMapping("/api/v1/products")
+public class ReactiveProductController {
+    private final ReactiveProductService productService;
+    
+    @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<Product> streamProducts() {
+        return productService.findAll()
+            .delayElements(Duration.ofSeconds(1)); // Simulate streaming
+    }
+    
+    @GetMapping("/{id}")
+    public Mono<ResponseEntity<Product>> getProduct(@PathVariable String id) {
+        return productService.findById(id)
+            .map(ResponseEntity::ok)
+            .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+    
+    @PostMapping
+    public Mono<Product> createProduct(@Valid @RequestBody Mono<CreateProductRequest> request) {
+        return request
+            .flatMap(productService::create)
+            .doOnNext(product -> log.info("Product created: {}", product.getId()));
+    }
+}
+
+// Reactive Service
+@Service
+public class ReactiveProductService {
+    private final ReactiveMongoRepository<Product, String> repository;
+    private final WebClient inventoryClient;
+    
+    public Flux<Product> findAll() {
+        return repository.findAll()
+            .filter(Product::isActive)
+            .flatMap(this::enrichWithInventory);
+    }
+    
+    private Mono<Product> enrichWithInventory(Product product) {
+        return inventoryClient
+            .get()
+            .uri("/inventory/{productId}", product.getId())
+            .retrieve()
+            .bodyToMono(Inventory.class)
+            .map(inventory -> {
+                product.setStock(inventory.getQuantity());
+                return product;
+            })
+            .onErrorReturn(product); // Return product without inventory on error
+    }
+    
+    public Mono<Product> create(CreateProductRequest request) {
+        return Mono.just(request)
+            .map(req -> new Product(req.getName(), req.getPrice()))
+            .flatMap(repository::save)
+            .flatMap(this::publishCreatedEvent);
+    }
+    
+    private Mono<Product> publishCreatedEvent(Product product) {
+        return Mono.fromRunnable(() -> 
+            eventPublisher.publishEvent(new ProductCreatedEvent(product))
+        ).thenReturn(product);
+    }
+}
+
+// WebClient Configuration
+@Configuration
+public class WebClientConfiguration {
+    
+    @Bean
+    public WebClient inventoryWebClient() {
+        return WebClient.builder()
+            .baseUrl("http://inventory-service")
+            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .filter(ExchangeFilterFunction.ofRequestProcessor(request -> {
+                log.debug("Request: {} {}", request.method(), request.url());
+                return Mono.just(request);
+            }))
+            .filter(ExchangeFilterFunction.ofResponseProcessor(response -> {
+                log.debug("Response: {}", response.statusCode());
+                return Mono.just(response);
+            }))
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
+            .build();
+    }
+}
+
+// Reactive Error Handling
+@Component
+public class ReactiveErrorHandler {
+    
+    public <T> Mono<T> withRetry(Mono<T> mono, int maxAttempts) {
+        return mono.retryWhen(
+            Retry.backoff(maxAttempts, Duration.ofSeconds(1))
+                .maxBackoff(Duration.ofSeconds(10))
+                .doBeforeRetry(signal -> 
+                    log.warn("Retrying after error: {}", signal.failure().getMessage())
+                )
+        );
+    }
+    
+    public <T> Mono<T> withCircuitBreaker(Mono<T> mono, String name) {
+        return mono
+            .transform(CircuitBreaker.of(name)::executeMonoFallback)
+            .doOnError(e -> log.error("Circuit breaker {} opened", name));
+    }
+}
+```
+
+### Spring Cloud Microservices
+
+Spring Cloud provides patterns for building resilient microservices.
+
+```java
+// Service Discovery with Eureka
+@SpringBootApplication
+@EnableEurekaClient
+@EnableCircuitBreaker
+@EnableFeignClients
+public class ProductServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ProductServiceApplication.class, args);
+    }
+}
+
+// Feign Client
+@FeignClient(name = "inventory-service", fallback = InventoryClientFallback.class)
+public interface InventoryClient {
+    
+    @GetMapping("/api/inventory/{productId}")
+    InventoryResponse getInventory(@PathVariable("productId") Long productId);
+    
+    @PutMapping("/api/inventory/{productId}/reduce")
+    void reduceStock(@PathVariable("productId") Long productId, @RequestParam int quantity);
+}
+
+@Component
+public class InventoryClientFallback implements InventoryClient {
+    
+    @Override
+    public InventoryResponse getInventory(Long productId) {
+        return InventoryResponse.unavailable();
+    }
+    
+    @Override
+    public void reduceStock(Long productId, int quantity) {
+        log.warn("Inventory service unavailable, queuing stock reduction");
+        // Queue for later processing
+    }
+}
+
+// API Gateway Configuration
+@Configuration
+public class GatewayConfiguration {
+    
+    @Bean
+    public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
+        return builder.routes()
+            .route("product-service", r -> r
+                .path("/api/products/**")
+                .filters(f -> f
+                    .rewritePath("/api/products/(?<segment>.*)", "/products/${segment}")
+                    .addRequestHeader("X-Response-Time", LocalDateTime.now().toString())
+                    .circuitBreaker(config -> config
+                        .setName("productServiceCB")
+                        .setFallbackUri("forward:/fallback/products")
+                    )
+                    .retry(config -> config
+                        .setRetries(3)
+                        .setStatuses(HttpStatus.SERVICE_UNAVAILABLE)
+                    )
+                )
+                .uri("lb://product-service")
+            )
+            .route("inventory-service", r -> r
+                .path("/api/inventory/**")
+                .filters(f -> f
+                    .requestRateLimiter(config -> config
+                        .setRateLimiter(redisRateLimiter())
+                        .setKeyResolver(userKeyResolver())
+                    )
+                )
+                .uri("lb://inventory-service")
+            )
+            .build();
+    }
+    
+    @Bean
+    public RedisRateLimiter redisRateLimiter() {
+        return new RedisRateLimiter(10, 20);
+    }
+    
+    @Bean
+    KeyResolver userKeyResolver() {
+        return exchange -> Mono.just(
+            exchange.getRequest().getHeaders().getFirst("X-User-Id")
+        );
+    }
+}
+
+// Distributed Tracing
+@Component
+public class TracingConfiguration {
+    
+    @Bean
+    public Sampler defaultSampler() {
+        return Sampler.ALWAYS_SAMPLE;
+    }
+    
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplateBuilder()
+            .interceptors((request, body, execution) -> {
+                request.getHeaders().add("X-Trace-Id", MDC.get("traceId"));
+                return execution.execute(request, body);
+            })
+            .build();
+    }
+}
+
+// Configuration Management with Spring Cloud Config
+@RefreshScope
+@RestController
+public class ConfigController {
+    
+    @Value("${app.feature.newFeature:false}")
+    private boolean newFeatureEnabled;
+    
+    @GetMapping("/features/new-feature")
+    public Map<String, Boolean> getFeatureStatus() {
+        return Map.of("enabled", newFeatureEnabled);
+    }
+    
+    @PostMapping("/actuator/refresh")
+    public void refresh() {
+        // Endpoint to refresh configuration without restart
+    }
+}
+```
+
+### Testing Strategies
+
+Comprehensive testing ensures reliability and maintainability.
+
+```java
+// Unit Testing with Mockito
+@ExtendWith(MockitoExtension.class)
+class OrderServiceTest {
+    
+    @Mock
+    private OrderRepository orderRepository;
+    
+    @Mock
+    private PaymentService paymentService;
+    
+    @InjectMocks
+    private OrderService orderService;
+    
+    @Test
+    void shouldCreateOrderSuccessfully() {
+        // Given
+        CreateOrderRequest request = CreateOrderRequest.builder()
+            .customerId(1L)
+            .items(List.of(new OrderItem("PROD-1", 2)))
+            .build();
+        
+        Order order = new Order(request);
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+        when(paymentService.processPayment(any())).thenReturn(PaymentResult.success());
+        
+        // When
+        Order result = orderService.createOrder(request);
+        
+        // Then
+        assertThat(result).isNotNull();
+        assertThat(result.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(orderRepository).save(any(Order.class));
+        verify(paymentService).processPayment(any());
+    }
+    
+    @Test
+    void shouldRollbackOnPaymentFailure() {
+        // Given
+        when(paymentService.processPayment(any()))
+            .thenThrow(new PaymentException("Payment failed"));
+        
+        // When/Then
+        assertThrows(PaymentException.class, () -> 
+            orderService.createOrder(createOrderRequest())
+        );
+        
+        verify(orderRepository, never()).save(any());
+    }
+}
+
+// Integration Testing
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class ProductControllerIntegrationTest {
+    
+    @Autowired
+    private MockMvc mockMvc;
+    
+    @Autowired
+    private ProductRepository productRepository;
+    
+    @Test
+    @Sql(scripts = "/test-data.sql")
+    @Transactional
+    void shouldReturnProductList() throws Exception {
+        mockMvc.perform(get("/api/products")
+                .contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$", hasSize(3)))
+            .andExpect(jsonPath("$[0].name").value("Product 1"));
+    }
+    
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void shouldCreateProductWithAdminRole() throws Exception {
+        String productJson = """
+            {
+                "name": "New Product",
+                "price": 29.99,
+                "category": "ELECTRONICS"
+            }
+            """;
+        
+        mockMvc.perform(post("/api/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(productJson))
+            .andExpect(status().isCreated())
+            .andExpect(header().exists("Location"));
+        
+        assertThat(productRepository.count()).isEqualTo(1);
+    }
+}
+
+// Repository Testing
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Testcontainers
+class OrderRepositoryTest {
+    
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:14")
+            .withDatabaseName("testdb")
+            .withUsername("test")
+            .withPassword("test");
+    
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
+    
+    @Autowired
+    private TestEntityManager entityManager;
+    
+    @Autowired
+    private OrderRepository orderRepository;
+    
+    @Test
+    void shouldFindOrdersByStatus() {
+        // Given
+        Order order1 = createOrder(OrderStatus.PENDING);
+        Order order2 = createOrder(OrderStatus.CONFIRMED);
+        Order order3 = createOrder(OrderStatus.PENDING);
+        
+        entityManager.persist(order1);
+        entityManager.persist(order2);
+        entityManager.persist(order3);
+        entityManager.flush();
+        
+        // When
+        List<Order> pendingOrders = orderRepository.findByStatus(OrderStatus.PENDING);
+        
+        // Then
+        assertThat(pendingOrders).hasSize(2);
+        assertThat(pendingOrders).extracting("status")
+            .containsOnly(OrderStatus.PENDING);
+    }
+}
+
+// Contract Testing with Spring Cloud Contract
+@RunWith(SpringRunner.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@AutoConfigureMockMvc
+@AutoConfigureJsonTesters
+public class ProductContractTest extends ProductBase {
+    
+    @Autowired
+    private MockMvc mockMvc;
+    
+    @MockBean
+    private ProductService productService;
+    
+    @Before
+    public void setup() {
+        Product product = new Product(1L, "Test Product", new BigDecimal("19.99"));
+        when(productService.findById(1L)).thenReturn(Optional.of(product));
+        
+        RestAssuredMockMvc.mockMvc(mockMvc);
+    }
+}
+```
+
+---
+
+## Code Quality and Performance
+
+### Java Streams Best Practices
+
+Streams provide powerful functional programming capabilities but require careful use for optimal performance.
+
+```java
+// Stream Performance Optimization
+public class StreamOptimization {
+    
+    // Bad: Multiple iterations
+    public OrderSummary processOrdersBad(List<Order> orders) {
+        double total = orders.stream()
+            .mapToDouble(Order::getAmount)
+            .sum();
+        
+        long count = orders.stream()
+            .filter(order -> order.getStatus() == OrderStatus.COMPLETED)
+            .count();
+        
+        Optional<Order> maxOrder = orders.stream()
+            .max(Comparator.comparing(Order::getAmount));
+        
+        return new OrderSummary(total, count, maxOrder.orElse(null));
+    }
+    
+    // Good: Single iteration with custom collector
+    public OrderSummary processOrdersGood(List<Order> orders) {
+        return orders.stream()
+            .collect(Collector.of(
+                OrderSummary::new,
+                (summary, order) -> {
+                    summary.addToTotal(order.getAmount());
+                    if (order.getStatus() == OrderStatus.COMPLETED) {
+                        summary.incrementCount();
+                    }
+                    summary.updateMax(order);
+                },
+                (s1, s2) -> s1.merge(s2)
+            ));
+    }
+    
+    // Parallel Stream Considerations
+    public List<ProcessedOrder> processLargeDataset(List<Order> orders) {
+        // Only use parallel for large datasets with CPU-intensive operations
+        if (orders.size() < 10000) {
+            return orders.stream()
+                .map(this::expensiveProcessing)
+                .collect(Collectors.toList());
+        }
+        
+        ForkJoinPool customThreadPool = new ForkJoinPool(4);
+        try {
+            return customThreadPool.submit(() ->
+                orders.parallelStream()
+                    .map(this::expensiveProcessing)
+                    .collect(Collectors.toList())
+            ).get();
+        } catch (Exception e) {
+            throw new ProcessingException(e);
+        } finally {
+            customThreadPool.shutdown();
+        }
+    }
+    
+    // Lazy Evaluation and Short-Circuiting
+    public Optional<Product> findFirstAvailableProduct(List<Product> products) {
+        return products.stream()
+            .filter(Product::isAvailable)
+            .filter(p -> p.getPrice().compareTo(new BigDecimal("100")) < 0)
+            .findFirst(); // Short-circuits on first match
+    }
+    
+    // Custom Collectors
+    public Map<Category, ProductStats> analyzeProducts(List<Product> products) {
+        return products.stream()
+            .collect(Collectors.groupingBy(
+                Product::getCategory,
+                Collector.of(
+                    ProductStats::new,
+                    ProductStats::accept,
+                    ProductStats::combine
+                )
+            ));
+    }
+}
+
+// Avoiding Common Stream Pitfalls
+public class StreamPitfalls {
+    
+    // Bad: Stream reuse
+    public void reuseStreamBad(List<String> items) {
+        Stream<String> stream = items.stream();
+        stream.forEach(System.out::println);
+        stream.forEach(System.out::println); // IllegalStateException
+    }
+    
+    // Good: Create new stream
+    public void reuseStreamGood(List<String> items) {
+        items.stream().forEach(System.out::println);
+        items.stream().forEach(System.out::println);
+    }
+    
+    // Bad: Modifying source during iteration
+    public List<Product> filterAndModifyBad(List<Product> products) {
+        return products.stream()
+            .filter(p -> {
+                if (p.getPrice() == null) {
+                    p.setPrice(BigDecimal.ZERO); // Modifying during iteration
+                }
+                return p.isActive();
+            })
+            .collect(Collectors.toList());
+    }
+    
+    // Good: Separate operations
+    public List<Product> filterAndModifyGood(List<Product> products) {
+        products.forEach(p -> {
+            if (p.getPrice() == null) {
+                p.setPrice(BigDecimal.ZERO);
+            }
+        });
+        
+        return products.stream()
+            .filter(Product::isActive)
+            .collect(Collectors.toList());
+    }
+}
+```
+
+### Memory Management and GC Optimization
+
+Understanding memory management helps prevent leaks and optimize performance.
+
+```java
+// Object Pooling for Expensive Objects
+public class ConnectionPool {
+    private final Queue<Connection> available = new ConcurrentLinkedQueue<>();
+    private final Set<Connection> inUse = Collections.synchronizedSet(new HashSet<>());
+    private final int maxSize;
+    
+    public ConnectionPool(int maxSize) {
+        this.maxSize = maxSize;
+        initializePool();
+    }
+    
+    private void initializePool() {
+        for (int i = 0; i < maxSize; i++) {
+            available.offer(createConnection());
+        }
+    }
+    
+    public Connection acquire() throws InterruptedException {
+        if (available.isEmpty() && inUse.size() >= maxSize) {
+            // Wait for connection to be released
+            synchronized (available) {
+                while (available.isEmpty()) {
+                    available.wait();
+                }
+            }
+        }
+        
+        Connection connection = available.poll();
+        if (connection == null) {
+            connection = createConnection();
+        }
+        
+        inUse.add(connection);
+        return connection;
+    }
+    
+    public void release(Connection connection) {
+        inUse.remove(connection);
+        if (connection.isValid()) {
+            available.offer(connection);
+        } else {
+            available.offer(createConnection());
+        }
+        
+        synchronized (available) {
+            available.notify();
+        }
+    }
+}
+
+// Weak References for Cache
+public class ImageCache {
+    private final Map<String, WeakReference<Image>> cache = new ConcurrentHashMap<>();
+    
+    public Image getImage(String key) {
+        WeakReference<Image> ref = cache.get(key);
+        Image image = (ref != null) ? ref.get() : null;
+        
+        if (image == null) {
+            image = loadImage(key);
+            cache.put(key, new WeakReference<>(image));
+        }
+        
+        return image;
+    }
+    
+    // Cleanup expired references periodically
+    @Scheduled(fixedDelay = 60000)
+    public void cleanupExpiredReferences() {
+        cache.entrySet().removeIf(entry -> entry.getValue().get() == null);
+    }
+}
+
+// String Deduplication
+public class StringOptimization {
+    private final Map<String, String> stringPool = new ConcurrentHashMap<>();
+    
+    public String intern(String str) {
+        return stringPool.computeIfAbsent(str, k -> k);
+    }
+    
+    // Use StringBuilder for concatenation
+    public String buildMessage(List<String> parts) {
+        StringBuilder builder = new StringBuilder(parts.size() * 20); // Pre-size
+        for (String part : parts) {
+            builder.append(part).append(", ");
+        }
+        return builder.toString();
+    }
+}
+
+// JVM Tuning Configuration
+/*
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:InitiatingHeapOccupancyPercent=45
+-XX:+UseStringDeduplication
+-XX:+ParallelRefProcEnabled
+-XX:+UnlockExperimentalVMOptions
+-XX:+AlwaysPreTouch
+-Xms2g
+-Xmx2g
+-XX:MetaspaceSize=256m
+-XX:MaxMetaspaceSize=512m
+*/
+```
+
+### Concurrency Patterns
+
+Thread-safe code is essential for multi-threaded applications.
+
+```java
+// Thread-Safe Singleton
+public class ConfigurationManager {
+    private static volatile ConfigurationManager instance;
+    private final Map<String, String> config;
+    
+    private ConfigurationManager() {
+        this.config = loadConfiguration();
+    }
+    
+    public static ConfigurationManager getInstance() {
+        if (instance == null) {
+            synchronized (ConfigurationManager.class) {
+                if (instance == null) {
+                    instance = new ConfigurationManager();
+                }
+            }
+        }
+        return instance;
+    }
+}
+
+// Producer-Consumer Pattern
+public class TaskQueue {
+    private final BlockingQueue<Task> queue = new LinkedBlockingQueue<>(1000);
+    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    private volatile boolean running = true;
+    
+    public void start() {
+        for (int i = 0; i < 10; i++) {
+            executor.submit(this::processTask);
+        }
+    }
+    
+    private void processTask() {
+        while (running) {
+            try {
+                Task task = queue.poll(1, TimeUnit.SECONDS);
+                if (task != null) {
+                    task.execute();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+    
+    public void submit(Task task) throws InterruptedException {
+        if (!queue.offer(task, 5, TimeUnit.SECONDS)) {
+            throw new RejectedExecutionException("Queue is full");
+        }
+    }
+    
+    public void shutdown() {
+        running = false;
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+        }
+    }
+}
+
+// CompletableFuture Composition
+@Service
+public class AsyncOrderService {
+    private final ExecutorService executor = Executors.newFixedThreadPool(20);
+    
+    public CompletableFuture<OrderResult> processOrderAsync(Order order) {
+        return CompletableFuture
+            .supplyAsync(() -> validateOrder(order), executor)
+            .thenCompose(validOrder -> 
+                CompletableFuture.allOf(
+                    checkInventoryAsync(validOrder),
+                    processPaymentAsync(validOrder),
+                    calculateShippingAsync(validOrder)
+                ).thenApply(v -> validOrder)
+            )
+            .thenApplyAsync(this::finalizeOrder, executor)
+            .exceptionally(throwable -> {
+                log.error("Order processing failed", throwable);
+                return OrderResult.failed(throwable.getMessage());
+            });
+    }
+    
+    private CompletableFuture<Void> checkInventoryAsync(Order order) {
+        return CompletableFuture.runAsync(() -> {
+            // Check inventory
+        }, executor);
+    }
+}
+
+// Lock-Free Data Structures
+public class LockFreeCounter {
+    private final AtomicLong counter = new AtomicLong(0);
+    
+    public long increment() {
+        return counter.incrementAndGet();
+    }
+    
+    public long incrementBy(long delta) {
+        long current;
+        long next;
+        do {
+            current = counter.get();
+            next = current + delta;
+        } while (!counter.compareAndSet(current, next));
+        return next;
+    }
+}
+```
+
+### Exception Handling Strategies
+
+Proper exception handling improves reliability and debugging.
+
+```java
+// Custom Exception Hierarchy
+public abstract class ApplicationException extends Exception {
+    private final ErrorCode errorCode;
+    private final Map<String, Object> context;
+    
+    protected ApplicationException(ErrorCode errorCode, String message) {
+        super(message);
+        this.errorCode = errorCode;
+        this.context = new HashMap<>();
+    }
+    
+    protected ApplicationException(ErrorCode errorCode, String message, Throwable cause) {
+        super(message, cause);
+        this.errorCode = errorCode;
+        this.context = new HashMap<>();
+    }
+    
+    public ApplicationException withContext(String key, Object value) {
+        context.put(key, value);
+        return this;
+    }
+}
+
+public class BusinessException extends ApplicationException {
+    public BusinessException(ErrorCode errorCode, String message) {
+        super(errorCode, message);
+    }
+}
+
+public class TechnicalException extends ApplicationException {
+    public TechnicalException(ErrorCode errorCode, String message, Throwable cause) {
+        super(errorCode, message, cause);
+    }
+}
+
+// Global Exception Handler
+@RestControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+    
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ErrorResponse> handleBusinessException(BusinessException ex) {
+        log.warn("Business exception: {}", ex.getMessage(), ex);
+        
+        ErrorResponse response = ErrorResponse.builder()
+            .code(ex.getErrorCode().getCode())
+            .message(ex.getMessage())
+            .timestamp(Instant.now())
+            .context(ex.getContext())
+            .build();
+        
+        return ResponseEntity.status(ex.getErrorCode().getHttpStatus()).body(response);
+    }
+    
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException ex) {
+        Map<String, String> errors = ex.getBindingResult()
+            .getFieldErrors()
+            .stream()
+            .collect(Collectors.toMap(
+                FieldError::getField,
+                FieldError::getDefaultMessage
+            ));
+        
+        ErrorResponse response = ErrorResponse.builder()
+            .code("VALIDATION_ERROR")
+            .message("Validation failed")
+            .errors(errors)
+            .timestamp(Instant.now())
+            .build();
+        
+        return ResponseEntity.badRequest().body(response);
+    }
+    
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleUnexpectedException(Exception ex) {
+        String errorId = UUID.randomUUID().toString();
+        log.error("Unexpected error [{}]", errorId, ex);
+        
+        ErrorResponse response = ErrorResponse.builder()
+            .code("INTERNAL_ERROR")
+            .message("An unexpected error occurred")
+            .errorId(errorId)
+            .timestamp(Instant.now())
+            .build();
+        
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+}
+
+// Try-with-resources and AutoCloseable
+public class ResourceManager {
+    
+    public void processFile(String fileName) throws IOException {
+        try (BufferedReader reader = Files.newBufferedReader(Paths.get(fileName));
+             BufferedWriter writer = Files.newBufferedWriter(Paths.get(fileName + ".out"))) {
+            
+            reader.lines()
+                .map(this::processLine)
+                .forEach(line -> {
+                    try {
+                        writer.write(line);
+                        writer.newLine();
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
+        }
+    }
+}
+
+// Circuit Breaker Pattern
+public class ExternalServiceClient {
+    private final CircuitBreaker circuitBreaker;
+    
+    public ExternalServiceClient() {
+        this.circuitBreaker = new CircuitBreaker(
+            3,     // failure threshold
+            60000, // timeout in ms
+            30000  // reset timeout
+        );
+    }
+    
+    public Optional<Response> callService(Request request) {
+        if (!circuitBreaker.allowRequest()) {
+            log.warn("Circuit breaker is open");
+            return Optional.empty();
+        }
+        
+        try {
+            Response response = makeHttpCall(request);
+            circuitBreaker.recordSuccess();
+            return Optional.of(response);
+        } catch (Exception e) {
+            circuitBreaker.recordFailure();
+            log.error("Service call failed", e);
+            return Optional.empty();
+        }
+    }
+}
+```
+
+### Logging Best Practices
+
+Effective logging is crucial for debugging and monitoring.
+
+```java
+// Structured Logging with SLF4J
+@Slf4j
+@Service
+public class OrderProcessingService {
+    
+    public void processOrder(Order order) {
+        MDC.put("orderId", order.getId());
+        MDC.put("customerId", order.getCustomerId());
+        
+        try {
+            log.info("Processing order started");
+            
+            validateOrder(order);
+            log.debug("Order validation completed");
+            
+            PaymentResult paymentResult = processPayment(order);
+            log.info("Payment processed", 
+                kv("paymentId", paymentResult.getTransactionId()),
+                kv("amount", order.getTotalAmount()));
+            
+            shipOrder(order);
+            log.info("Order processing completed successfully");
+            
+        } catch (Exception e) {
+            log.error("Order processing failed", e);
+            throw e;
+        } finally {
+            MDC.clear();
+        }
+    }
+    
+    // Structured logging helper
+    private StructuredArgument kv(String key, Object value) {
+        return StructuredArguments.keyValue(key, value);
+    }
+}
+
+// Logback Configuration
+/*
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyNames>orderId,customerId,userId</includeMdcKeyNames>
+            <customFields>{"app":"order-service","env":"${ENV:-local}"}</customFields>
+        </encoder>
+    </appender>
+    
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/application.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/application-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{ISO8601} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <logger name="com.example" level="DEBUG"/>
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.hibernate.SQL" level="DEBUG"/>
+    
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>
+*/
+
+// Aspect for Method Logging
+@Aspect
+@Component
+@Slf4j
+public class LoggingAspect {
+    
+    @Around("@annotation(Loggable)")
+    public Object logExecutionTime(ProceedingJoinPoint joinPoint) throws Throwable {
+        String method = joinPoint.getSignature().toShortString();
+        Object[] args = joinPoint.getArgs();
+        
+        log.debug("Entering method: {} with args: {}", method, args);
+        long start = System.currentTimeMillis();
+        
+        try {
+            Object result = joinPoint.proceed();
+            long duration = System.currentTimeMillis() - start;
+            
+            log.info("Method {} executed in {} ms", method, duration);
+            return result;
+            
+        } catch (Exception e) {
+            log.error("Method {} failed after {} ms", 
+                method, System.currentTimeMillis() - start, e);
+            throw e;
+        }
+    }
+}
+```
+
+### Code Review Guidelines
+
+Code reviews ensure quality and knowledge sharing.
+
+```java
+// Code Review Checklist Implementation
+public class CodeReviewChecklist {
+    
+    /*
+     * SOLID Principles Check
+     * - Single Responsibility: Each class has one reason to change
+     * - Open/Closed: Open for extension, closed for modification
+     * - Liskov Substitution: Derived classes substitutable for base
+     * - Interface Segregation: No fat interfaces
+     * - Dependency Inversion: Depend on abstractions
+     */
+    
+    // Example: Good practice - follows SRP
+    @Service
+    public class EmailNotificationService {
+        private final EmailSender emailSender;
+        private final TemplateEngine templateEngine;
+        
+        public void sendOrderConfirmation(Order order) {
+            String content = templateEngine.render("order-confirmation", order);
+            emailSender.send(order.getCustomerEmail(), "Order Confirmation", content);
+        }
+    }
+    
+    /*
+     * Performance Considerations
+     * - N+1 queries avoided
+     * - Proper indexing
+     * - Caching where appropriate
+     * - Lazy loading vs eager fetching
+     */
+    
+    // Example: Good practice - avoiding N+1
+    @Query("SELECT o FROM Order o JOIN FETCH o.orderLines WHERE o.status = :status")
+    List<Order> findOrdersWithLines(@Param("status") OrderStatus status);
+    
+    /*
+     * Security Review Points
+     * - Input validation
+     * - SQL injection prevention
+     * - XSS prevention
+     * - Authentication/Authorization
+     * - Sensitive data handling
+     */
+    
+    // Example: Good practice - input validation
+    @PostMapping("/transfer")
+    public ResponseEntity<?> transfer(@Valid @RequestBody TransferRequest request) {
+        // @Valid ensures validation
+        // Additional business validation
+        if (request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new InvalidAmountException("Amount must be positive");
+        }
+        
+        return ResponseEntity.ok(accountService.transfer(request));
+    }
+    
+    /*
+     * Error Handling Review
+     * - Proper exception hierarchy
+     * - Meaningful error messages
+     * - No sensitive data in logs
+     * - Graceful degradation
+     */
+    
+    // Example: Good practice - proper error handling
+    public Optional<User> findUser(String username) {
+        try {
+            return Optional.ofNullable(userRepository.findByUsername(username));
+        } catch (DataAccessException e) {
+            log.error("Failed to fetch user: {}", username, e);
+            // Don't expose internal errors
+            return Optional.empty();
+        }
+    }
+    
+    /*
+     * Testing Coverage
+     * - Unit tests for business logic
+     * - Integration tests for APIs
+     * - Edge cases covered
+     * - Mocking appropriately used
+     */
+    
+    @Test
+    void shouldHandleNullInput() {
+        assertThrows(IllegalArgumentException.class, 
+            () -> service.process(null));
+    }
+    
+    @Test
+    void shouldHandleEmptyList() {
+        List<Item> result = service.process(Collections.emptyList());
+        assertThat(result).isEmpty();
+    }
+}
+
+// Static Analysis Configuration
+/*
+plugins {
+    id 'com.github.spotbugs' version '5.0.14'
+    id 'pmd' version '6.43.0'
+    id 'checkstyle' version '10.3.3'
+}
+
+spotbugs {
+    excludeFilter = file("config/spotbugs/exclude.xml")
+}
+
+pmd {
+    ruleSets = ["category/java/bestpractices

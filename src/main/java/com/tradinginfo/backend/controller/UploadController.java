@@ -91,12 +91,13 @@ public class UploadController {
 
     @PostMapping("/folder")
     public ResponseEntity<Map<String, String>> createFolder(
-            @RequestBody Map<String, String> request) {
+            @RequestBody Map<String, Object> request) {
 
-        String initData = request.get("initData");
-        String folderName = request.get("folderName");
+        String initData = (String) request.get("initData");
+        String folderName = (String) request.get("folderName");
+        Boolean subscriptionRequired = (Boolean) request.getOrDefault("subscriptionRequired", false);
 
-        log.info("📁 Creating folder: {}", folderName);
+        log.info("📁 Creating folder: {} with subscription required: {}", folderName, subscriptionRequired);
 
         // Extract telegram user ID from initData
         Long telegramId = telegramAuthService.extractTelegramUserId(initData);
@@ -111,7 +112,7 @@ public class UploadController {
         }
 
         try {
-            uploadService.createFolder(folderName, telegramId);
+            uploadService.createFolder(folderName, telegramId, subscriptionRequired);
 
             // Clear lesson cache after folder creation
             redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
@@ -176,6 +177,41 @@ public class UploadController {
         } catch (Exception e) {
             log.error("Error deleting lesson: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to delete lesson: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/folder/subscription")
+    public ResponseEntity<Map<String, String>> updateFolderSubscription(
+            @RequestBody Map<String, Object> request) {
+
+        String initData = (String) request.get("initData");
+        String folderPath = (String) request.get("folderPath");
+        Boolean subscriptionRequired = (Boolean) request.get("subscriptionRequired");
+
+        log.info("📁 Updating folder subscription: {} to {}", folderPath, subscriptionRequired);
+
+        // Extract telegram user ID from initData
+        Long telegramId = telegramAuthService.extractTelegramUserId(initData);
+
+        // Validate initData and check admin permissions
+        if (!telegramAuthService.validateInitData(initData)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
+        }
+
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        try {
+            uploadService.updateFolderSubscription(folderPath, subscriptionRequired);
+
+            // Clear lesson cache after updating folder
+            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+
+            return ResponseEntity.ok(Map.of("message", "Folder subscription updated successfully"));
+        } catch (Exception e) {
+            log.error("Error updating folder subscription: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to update folder: " + e.getMessage()));
         }
     }
 
