@@ -34,18 +34,6 @@ public class TelegramBotService {
     private static final Set<Long> ADMIN_USER_IDS = Set.of(781182099L, 5974666109L);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
 
-    public void sendMessageToChannel(String message) {
-        sendMessageToChannel(message, null);
-    }
-
-    public void sendMessageToChannel(String message, String parseMode) {
-        try {
-            Map<String, Object> payload = createMessagePayload(channelId, message, parseMode);
-            sendTelegramMessage(payload, "channel " + channelId);
-        } catch (Exception e) {
-            log.error("Error sending Telegram message to channel", e);
-        }
-    }
 
     public void sendMessageToUser(Long userId, String message) {
         sendMessageToUser(userId, message, null);
@@ -91,20 +79,6 @@ public class TelegramBotService {
                 });
     }
 
-    /**
-     * Send lesson notification to channel
-     */
-    public void notifyNewLesson(String lessonTitle, String lessonPath) {
-        String message = String.format(
-                "🎓 *Новый урок доступен!*\n\n" +
-                        "📖 %s\n\n" +
-                        "Изучайте торговые стратегии вместе с H.E.A.R.T. Trading Academy!\n\n" +
-                        "#урок #трейдинг #обучение",
-                lessonTitle
-        );
-
-        sendMessageToChannel(message, "Markdown");
-    }
 
     /**
      * Send lesson completion notification
@@ -212,21 +186,6 @@ public class TelegramBotService {
         );
     }
 
-    /**
-     * Process lesson notification with validation
-     */
-    public Map<String, String> processLessonNotification(String lessonTitle, String lessonPath) {
-        return Optional.ofNullable(lessonTitle)
-                .filter(title -> !title.trim().isEmpty())
-                .map(title -> {
-                    notifyNewLesson(title, lessonPath);
-                    return Map.of(
-                            "message", "Notification sent to channel",
-                            "lessonTitle", title
-                    );
-                })
-                .orElse(Map.of("error", "Lesson title is required"));
-    }
 
     /**
      * Process lesson completion notification with validation
@@ -279,8 +238,7 @@ public class TelegramBotService {
      */
     private Map<String, String> sendMessageToTarget(String message, String target) {
         if ("channel".equals(target)) {
-            sendMessageToChannel(message);
-            return Map.of("message", "Message sent to channel");
+            return Map.of("error", "Channel notifications disabled");
         }
 
         try {

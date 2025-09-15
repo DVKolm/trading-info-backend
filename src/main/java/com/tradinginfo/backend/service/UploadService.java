@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -56,12 +57,33 @@ public class UploadService {
 
         try {
             Path tempDir = Files.createTempDirectory("upload_");
+            log.info("Created temp directory: {}", tempDir);
             extractZipFile(file, tempDir);
+            log.info("Extracted ZIP file to temp directory");
 
+            // Log all extracted files
             Files.walk(tempDir)
                     .filter(Files::isRegularFile)
+                    .forEach(path -> log.info("Found extracted file: {}", path.getFileName()));
+
+            // Process .md files and copy images
+            List<Path> mdFiles = Files.walk(tempDir)
+                    .filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".md"))
-                    .forEach(mdFile -> processMarkdownFile(mdFile, targetFolder, uploadedFiles, errors));
+                    .collect(Collectors.toList());
+
+            List<Path> imageFiles = Files.walk(tempDir)
+                    .filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String fileName = path.getFileName().toString().toLowerCase();
+                        return fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".gif") || fileName.endsWith(".webp");
+                    })
+                    .collect(Collectors.toList());
+
+            log.info("Found {} .md files and {} image files to process", mdFiles.size(), imageFiles.size());
+
+            mdFiles.forEach(mdFile -> processMarkdownFile(mdFile, targetFolder, uploadedFiles, errors));
+            imageFiles.forEach(imageFile -> copyImageFile(imageFile, tempDir, targetFolder, errors));
 
             deleteDirectory(tempDir);
 
@@ -72,7 +94,7 @@ public class UploadService {
                 result.put("errors", errors);
             }
 
-            sendTelegramNotificationForUpload(targetFolder, uploadedFiles);
+            // sendTelegramNotificationForUpload(targetFolder, uploadedFiles);
 
         } catch (IOException e) {
             log.error("Upload failed due to IO error", e);
@@ -214,6 +236,12 @@ public class UploadService {
             String originalFilename = Optional.ofNullable(file.getOriginalFilename())
                     .orElseThrow(() -> new IllegalArgumentException("File name is required"));
 
+            // Handle ZIP files by redirecting to uploadLessons method
+            if (originalFilename.endsWith(".zip")) {
+                log.info("ZIP file detected in single upload, redirecting to bulk upload: {}", originalFilename);
+                return uploadLessons(file, targetFolder, telegramId);
+            }
+
             if (!originalFilename.endsWith(".md")) {
                 result.put("success", false);
                 result.put("error", "Only Markdown (.md) files are allowed");
@@ -232,7 +260,7 @@ public class UploadService {
             result.put("fileName", originalFilename);
 
             log.info("Uploaded single lesson: {}", originalFilename);
-            sendTelegramNotificationForSingleLessonUpload(originalFilename, targetFolder);
+            // sendTelegramNotificationForSingleLessonUpload(originalFilename, targetFolder);
 
         } catch (IOException e) {
             log.error("Failed to upload single lesson due to IO error", e);
@@ -258,7 +286,7 @@ public class UploadService {
         lessonRepository.deleteAll(lessons);
         log.info("Deleted {} lessons from folder: {}", lessons.size(), folder);
 
-        sendTelegramNotificationForFolderDeletion(folder, lessons.size());
+        // sendTelegramNotificationForFolderDeletion(folder, lessons.size());
     }
 
     public void deleteSingleLesson(String lessonPath, Long telegramId) {
@@ -269,7 +297,7 @@ public class UploadService {
         lessonRepository.delete(lesson);
         log.info("Deleted single lesson: {}", lessonPath);
 
-        sendTelegramNotificationForLessonDeletion(lessonPath, lesson.getTitle());
+        // sendTelegramNotificationForLessonDeletion(lessonPath, lesson.getTitle());
     }
 
     private void processMarkdownFile(Path mdFile, String targetFolder,
@@ -288,82 +316,45 @@ public class UploadService {
         }
     }
 
-    private void sendTelegramNotificationForUpload(String targetFolder, List<String> uploadedFiles) {
-        if (uploadedFiles.isEmpty() || telegramBotService.isEmpty()) {
-            return;
-        }
-
+    private void copyImageFile(Path imageFile, Path tempDir, String targetFolder, List<String> errors) {
         try {
-            String message = String.format("""
-                📚 *Новые уроки загружены!*
+            String fileName = imageFile.getFileName().toString();
 
-                Папка: `%s`
-                Количество файлов: %d
-                Файлы: %s
-                """, targetFolder, uploadedFiles.size(), String.join(", ", uploadedFiles));
+            // Create target directory structure
+            Path uploadFolderPath = Paths.get(uploadPath, targetFolder);
+            if (!Files.exists(uploadFolderPath)) {
+                Files.createDirectories(uploadFolderPath);
+            }
 
-            telegramBotService.get().sendMessageToChannel(message, "Markdown");
-            log.info("Telegram notification sent for uploaded lessons");
+            // Copy image to upload directory
+            Path targetImagePath = uploadFolderPath.resolve(fileName);
+            Files.copy(imageFile, targetImagePath, StandardCopyOption.REPLACE_EXISTING);
+
+            log.info("Copied image: {} to {}", fileName, targetImagePath);
         } catch (Exception e) {
-            log.warn("Failed to send Telegram notification for upload", e);
+            log.error("Failed to copy image: {}", imageFile.getFileName(), e);
+            errors.add("Image " + imageFile.getFileName().toString() + ": " + e.getMessage());
         }
+    }
+
+    private void sendTelegramNotificationForUpload(String targetFolder, List<String> uploadedFiles) {
+        // Notification to channel disabled
+        log.info("Lessons uploaded to folder: {} (files: {})", targetFolder, uploadedFiles.size());
     }
 
     private void sendTelegramNotificationForFolderDeletion(String folder, int lessonsCount) {
-        if (lessonsCount == 0 || telegramBotService.isEmpty()) {
-            return;
-        }
-
-        try {
-            String message = String.format("""
-                🗑️ *Папка с уроками удалена*
-
-                Папка: `%s`
-                Удалено уроков: %d
-                """, folder, lessonsCount);
-
-            telegramBotService.get().sendMessageToChannel(message, "Markdown");
-            log.info("Telegram notification sent for folder deletion");
-        } catch (Exception e) {
-            log.warn("Failed to send Telegram notification for folder deletion", e);
-        }
+        // Notification to channel disabled
+        log.info("Folder deleted: {} ({} lessons)", folder, lessonsCount);
     }
 
     private void sendTelegramNotificationForLessonDeletion(String lessonPath, String lessonTitle) {
-        telegramBotService.ifPresent(botService -> {
-            try {
-                String message = String.format("""
-                    🗑️ *Урок удален*
-
-                    Файл: `%s`
-                    Название: `%s`
-                    """, lessonPath, lessonTitle);
-
-                botService.sendMessageToChannel(message, "Markdown");
-                log.info("Telegram notification sent for single lesson deletion");
-            } catch (Exception e) {
-                log.warn("Failed to send Telegram notification for lesson deletion", e);
-            }
-        });
+        // Notification to channel disabled
+        log.info("Lesson deleted: {} ({})", lessonPath, lessonTitle);
     }
 
     private void sendTelegramNotificationForSingleLessonUpload(String fileName, String targetFolder) {
-        telegramBotService.ifPresent(botService -> {
-            try {
-                String folderName = Optional.ofNullable(targetFolder).orElse("Корень");
-                String message = String.format("""
-                    📝 *Новый урок загружен!*
-
-                    Файл: `%s`
-                    Папка: `%s`
-                    """, fileName, folderName);
-
-                botService.sendMessageToChannel(message, "Markdown");
-                log.info("Telegram notification sent for single lesson upload");
-            } catch (Exception e) {
-                log.warn("Failed to send Telegram notification for single lesson upload", e);
-            }
-        });
+        // Notification to channel disabled
+        log.info("Single lesson uploaded: {} to folder: {}", fileName, targetFolder);
     }
 
     private void deletePhysicalFolderSafely(String folderPath) {
@@ -432,6 +423,18 @@ public class UploadService {
             throw new IllegalArgumentException("Folder already exists: " + cleanFolderName);
         }
 
+        // Create physical folder in uploads directory
+        try {
+            Path folderPath = Paths.get(uploadPath, cleanFolderName);
+            if (!Files.exists(folderPath)) {
+                Files.createDirectories(folderPath);
+                log.info("📁 Physical folder created: {}", folderPath);
+            }
+        } catch (IOException e) {
+            log.error("Failed to create physical folder: {}", cleanFolderName, e);
+            throw new RuntimeException("Failed to create physical folder: " + e.getMessage());
+        }
+
         // Create folder as a Lesson entity
         Lesson folderLesson = new Lesson();
         folderLesson.setPath(cleanFolderName);
@@ -446,21 +449,6 @@ public class UploadService {
         lessonRepository.save(folderLesson);
 
         log.info("✅ Folder created: {} with subscription required: {}", cleanFolderName, subscriptionRequired);
-
-        // Send Telegram notification for folder creation
-        if (telegramBotService.isPresent()) {
-            try {
-                String accessType = (subscriptionRequired != null && subscriptionRequired) ? "💎 Требует подписку" : "🆓 Свободный доступ";
-                String message = String.format("📁 *Новая папка создана*\\n\\n" +
-                        "Название папки: `%s`\\n" +
-                        "Доступ: %s", cleanFolderName, accessType);
-
-                telegramBotService.get().sendMessageToChannel(message, "Markdown");
-                log.info("✅ Telegram notification sent for folder creation");
-            } catch (Exception e) {
-                log.warn("⚠️ Failed to send Telegram notification", e);
-            }
-        }
     }
 
     public void updateFolderSubscription(String folderPath, Boolean subscriptionRequired) {

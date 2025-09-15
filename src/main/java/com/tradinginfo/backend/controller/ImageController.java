@@ -34,6 +34,7 @@ public class ImageController {
     @GetMapping("/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {
         try {
+            // URL decode the filename (frontend sends URL encoded filenames)
             String decodedFilename = URLDecoder.decode(filename, StandardCharsets.UTF_8);
             log.info("Serving image: {}", decodedFilename);
 
@@ -60,8 +61,15 @@ public class ImageController {
     }
 
     private Optional<Path> findImagePath(String filename) {
+        // Try multiple possible locations for the image
         java.util.List<String> possiblePaths = Arrays.asList(
+                // Direct path in upload directory
                 uploadPath + "/" + filename,
+                // In Beginner lessons folder
+                uploadPath + "/Beginner lessons/" + filename,
+                // In any folder (search all subdirectories)
+                findInSubdirectories(filename),
+                // Fallback locations
                 "images/" + filename,
                 "lessons/images/" + filename,
                 "static/images/" + filename,
@@ -69,9 +77,29 @@ public class ImageController {
         );
 
         return possiblePaths.stream()
+                .filter(path -> path != null && !path.isEmpty())
                 .map(Paths::get)
                 .filter(path -> path.toFile().exists())
                 .findFirst();
+    }
+
+    private String findInSubdirectories(String filename) {
+        try {
+            Path uploadDir = Paths.get(uploadPath);
+            if (!uploadDir.toFile().exists()) {
+                return null;
+            }
+
+            // Search in all subdirectories of upload path
+            return java.nio.file.Files.walk(uploadDir)
+                    .filter(path -> path.getFileName().toString().equals(filename))
+                    .map(Path::toString)
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("Error searching for image in subdirectories: {}", filename, e);
+            return null;
+        }
     }
 
     private String determineContentType(String filename) {

@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -45,14 +46,42 @@ public class LessonService {
 
     private List<FolderDTO> loadAndCacheLessonFolders() {
         log.debug("Loading lesson folders from database");
-        List<String> folderNames = lessonRepository.findAll().stream()
+
+        // Get folders from lessons with parentFolder (existing logic)
+        List<String> folderNamesFromParent = lessonRepository.findAll().stream()
                 .map(this::extractLevel)
                 .filter(Objects::nonNull)
+                .filter(name -> !"Без категории".equals(name))
+                .distinct()
+                .collect(Collectors.toList());
+
+        // Get folders that are marked as isFolder = true
+        List<String> folderNamesFromIsFolder = lessonRepository.findAll().stream()
+                .filter(lesson -> Boolean.TRUE.equals(lesson.getIsFolder()))
+                .map(Lesson::getTitle)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // Combine both lists and remove duplicates
+        List<String> allFolderNames = Stream.concat(
+                folderNamesFromParent.stream(),
+                folderNamesFromIsFolder.stream()
+        )
                 .distinct()
                 .sorted(this::sortFoldersByLevel)
                 .collect(Collectors.toList());
 
-        List<FolderDTO> folders = folderNames.stream()
+        // Add "Без категории" if there are lessons without a parent folder and not in any isFolder
+        boolean hasOrphanLessons = lessonRepository.findAll().stream()
+                .anyMatch(lesson -> lesson.getParentFolder() == null &&
+                         !Boolean.TRUE.equals(lesson.getIsFolder()));
+
+        if (hasOrphanLessons) {
+            allFolderNames.add("Без категории");
+        }
+
+        List<FolderDTO> folders = allFolderNames.stream()
                 .map(folderName -> FolderDTO.create(folderName, folderName))
                 .collect(Collectors.toList());
 
@@ -118,6 +147,10 @@ public class LessonService {
     private String extractLevel(Lesson lesson) {
         String parentFolder = lesson.getParentFolder();
 
+        if (parentFolder == null) {
+            return "Без категории";
+        }
+
         if (parentFolder.startsWith("Начальный уровень")) {
             return "Начальный уровень (Бесплатно)";
         } else if (parentFolder.startsWith("Средний уровень")) {
@@ -154,23 +187,26 @@ public class LessonService {
     }
 
     public LessonDTO getLessonContent(String path, Long telegramId) {
+        // Normalize path: remove leading slash if present
+        String normalizedPath = path.startsWith("/") ? path.substring(1) : path;
+
         Optional<LessonDTO> cachedLesson = redisCacheService
-                .map(cache -> cache.getCachedLessonContent(path))
+                .map(cache -> cache.getCachedLessonContent(normalizedPath))
                 .filter(LessonDTO.class::isInstance)
                 .map(LessonDTO.class::cast);
 
         if (cachedLesson.isPresent()) {
-            log.debug("Retrieved lesson content from Redis cache: {}", path);
-            Optional.ofNullable(telegramId).ifPresent(id -> trackLessonOpen(id, path));
+            log.debug("Retrieved lesson content from Redis cache: {}", normalizedPath);
+            Optional.ofNullable(telegramId).ifPresent(id -> trackLessonOpen(id, normalizedPath));
             return cachedLesson.get();
         }
 
-        Lesson lesson = lessonRepository.findByPath(path)
-                .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + path));
+        Lesson lesson = lessonRepository.findByPath(normalizedPath)
+                .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + normalizedPath));
 
         LessonDTO lessonDTO = convertToDTO(lesson);
-        redisCacheService.ifPresent(cache -> cache.cacheLessonContent(path, lessonDTO));
-        Optional.ofNullable(telegramId).ifPresent(id -> trackLessonOpen(id, path));
+        redisCacheService.ifPresent(cache -> cache.cacheLessonContent(normalizedPath, lessonDTO));
+        Optional.ofNullable(telegramId).ifPresent(id -> trackLessonOpen(id, normalizedPath));
 
         return lessonDTO;
     }

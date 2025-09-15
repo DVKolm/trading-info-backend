@@ -37,7 +37,8 @@
       "Bash(fi)",
       "Bash(done)",
       "Bash(awk:*)",
-      "Bash(del nul)"
+      "Bash(del nul)",
+      "Bash(unzip:*)"
     ],
     "deny": [],
     "ask": []

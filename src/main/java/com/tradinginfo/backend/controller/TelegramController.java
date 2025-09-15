@@ -49,12 +49,7 @@ public class TelegramController {
         String lessonTitle = request.get("title");
         String lessonPath = request.get("path");
 
-        Map<String, String> result = telegramBotService.processLessonNotification(lessonTitle, lessonPath);
-
-        if (result.containsKey("error")) {
-            return ResponseEntity.badRequest().body(result);
-        }
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(Map.of("message", "Channel notifications disabled"));
     }
 
     @PostMapping("/check-subscription/{userId}")

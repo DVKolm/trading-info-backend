@@ -124,6 +124,34 @@ public class UploadController {
         }
     }
 
+    @PostMapping("/folder/admin")
+    public ResponseEntity<Map<String, String>> createFolderAdmin(
+            @RequestBody Map<String, Object> request,
+            @RequestHeader("X-Telegram-User-Id") Long telegramId) {
+
+        String folderName = (String) request.get("folderName");
+        Boolean subscriptionRequired = (Boolean) request.getOrDefault("subscriptionRequired", false);
+
+        log.info("📁 Admin creating folder: {} with subscription required: {}", folderName, subscriptionRequired);
+
+        // Check admin permissions
+        if (!telegramAuthService.isAdmin(telegramId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+
+        try {
+            uploadService.createFolder(folderName, telegramId, subscriptionRequired);
+
+            // Clear lesson cache after folder creation
+            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+
+            return ResponseEntity.ok(Map.of("message", "Folder created successfully: " + folderName));
+        } catch (Exception e) {
+            log.error("Error creating admin folder: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to create folder: " + e.getMessage()));
+        }
+    }
+
     @PostMapping("/clear-cache")
     public ResponseEntity<Map<String, String>> clearCache(
             @RequestBody Map<String, String> request) {
@@ -144,6 +172,19 @@ public class UploadController {
         } else {
             return ResponseEntity.ok(Map.of("message", "Redis not available, no cache to clear"));
         }
+    }
+
+    @GetMapping("/admin/check")
+    public ResponseEntity<Map<String, Object>> checkAdminAccess(
+            @RequestHeader("X-Telegram-User-Id") Long telegramId) {
+
+        boolean isAdmin = telegramAuthService.isAdmin(telegramId);
+        log.info("Admin access check for user {}: {}", telegramId, isAdmin);
+
+        return ResponseEntity.ok(Map.of(
+            "isAdmin", isAdmin,
+            "userId", telegramId
+        ));
     }
 
     @PostMapping("/delete-lesson")
@@ -178,6 +219,13 @@ public class UploadController {
             log.error("Error deleting lesson: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", "Failed to delete lesson: " + e.getMessage()));
         }
+    }
+
+    @DeleteMapping("/lesson")
+    public ResponseEntity<Map<String, String>> deleteSingleLessonDelete(
+            @RequestBody Map<String, String> request) {
+        // Delegate to POST method for compatibility
+        return deleteSingleLesson(request);
     }
 
     @PostMapping("/folder/subscription")
