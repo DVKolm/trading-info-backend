@@ -2,7 +2,6 @@ package com.tradinginfo.backend.dto;
 
 import lombok.Builder;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 
 @Builder
@@ -15,7 +14,5 @@ public record LessonDTO(
         Map<String, Object> frontmatter,
         Integer wordCount,
         String parentFolder,
-        Integer lessonNumber,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt) {
+        Integer lessonNumber) {
 }

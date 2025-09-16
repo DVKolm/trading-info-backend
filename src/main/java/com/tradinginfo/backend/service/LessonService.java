@@ -294,8 +294,6 @@ public class LessonService {
                 .wordCount(lesson.getWordCount())
                 .parentFolder(lesson.getParentFolder())
                 .lessonNumber(lesson.getLessonNumber())
-                .createdAt(lesson.getCreatedAt())
-                .updatedAt(lesson.getUpdatedAt())
                 .build();
     }
 }
