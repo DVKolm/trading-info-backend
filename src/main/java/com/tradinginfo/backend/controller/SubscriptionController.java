@@ -1,7 +1,9 @@
 package com.tradinginfo.backend.controller;
 
 import com.tradinginfo.backend.dto.SubscriptionStatusDTO;
-import com.tradinginfo.backend.service.SubscriptionService;
+import com.tradinginfo.backend.service.subscription.SubscriptionAccessService;
+import com.tradinginfo.backend.service.subscription.SubscriptionStatusService;
+import com.tradinginfo.backend.service.subscription.SubscriptionManagementService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +18,9 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class SubscriptionController {
 
-    private final SubscriptionService subscriptionService;
+    private final SubscriptionAccessService subscriptionAccessService;
+    private final SubscriptionStatusService subscriptionStatusService;
+    private final SubscriptionManagementService subscriptionManagementService;
 
     /**
      * Check if user has access to a specific lesson
@@ -26,8 +30,8 @@ public class SubscriptionController {
             @RequestParam(required = false) Long telegramId,
             @RequestParam String lessonPath) {
 
-        var hasAccess = subscriptionService.hasAccessToLesson(telegramId, lessonPath);
-        var isPremium = subscriptionService.isPremiumLesson(lessonPath);
+        var hasAccess = subscriptionAccessService.hasAccessToLesson(telegramId, lessonPath);
+        var isPremium = subscriptionAccessService.isPremiumLesson(lessonPath);
 
         return ResponseEntity.ok(Map.of(
             "hasAccess", hasAccess,
@@ -42,7 +46,7 @@ public class SubscriptionController {
     @GetMapping("/status/{userId}")
     public ResponseEntity<SubscriptionStatusDTO> getSubscriptionStatus(@PathVariable Long userId) {
         log.info("Getting subscription status for user: {}", userId);
-        var status = subscriptionService.getSubscriptionStatus(userId);
+        var status = subscriptionStatusService.getSubscriptionStatus(userId);
         return ResponseEntity.ok(status);
     }
 
@@ -54,7 +58,7 @@ public class SubscriptionController {
             @RequestParam Long telegramId,
             @RequestParam boolean verified) {
 
-        subscriptionService.handleSubscriptionVerification(telegramId, verified);
+        subscriptionManagementService.handleSubscriptionVerification(telegramId, verified);
         return ResponseEntity.ok().build();
     }
 
@@ -66,7 +70,7 @@ public class SubscriptionController {
             @RequestParam Long telegramId,
             @RequestParam(defaultValue = "30") int days) {
 
-        subscriptionService.grantPremiumAccess(telegramId, days);
+        subscriptionManagementService.grantPremiumAccess(telegramId, days);
         return ResponseEntity.ok(Map.of(
             "success", true,
             "message", "Premium access granted for " + days + " days"
@@ -78,7 +82,7 @@ public class SubscriptionController {
      */
     @PostMapping("/admin/revoke")
     public ResponseEntity<Map<String, Object>> revokePremiumAccess(@RequestParam Long telegramId) {
-        subscriptionService.revokePremiumAccess(telegramId);
+        subscriptionManagementService.revokePremiumAccess(telegramId);
         return ResponseEntity.ok(Map.of(
             "success", true,
             "message", "Premium access revoked"

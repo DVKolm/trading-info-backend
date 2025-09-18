@@ -2,6 +2,7 @@ package com.tradinginfo.backend.dto;
 
 import lombok.Builder;
 
+import java.io.Serializable;
 import java.util.Map;
 
 @Builder
@@ -14,5 +15,5 @@ public record LessonDTO(
         Map<String, Object> frontmatter,
         Integer wordCount,
         String parentFolder,
-        Integer lessonNumber) {
+        Integer lessonNumber) implements Serializable {
 }

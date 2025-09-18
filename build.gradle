@@ -27,34 +27,39 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
-    
+
     // Database
     runtimeOnly 'org.postgresql:postgresql:42.7.1'
-    
+
     // JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.12.3'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.3'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.3'
-    
+
     // File Upload
     implementation 'commons-io:commons-io:2.15.1'
 
     // Markdown Processing
     implementation 'org.commonmark:commonmark:0.21.0'
 
-    // Redis Cache
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    // Redis Cache - REMOVED
+    // implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
     // Telegram Bot API
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
-    
+
+    // MapStruct
+    implementation 'org.mapstruct:mapstruct:1.5.5.Final'
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.5.5.Final'
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
-    
+    annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
+
     // Development Tools
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    
+
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }

@@ -57,8 +57,6 @@ public class User {
     @Column(name = "last_active")
     private LocalDateTime lastActive = LocalDateTime.now();
 
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<UserProgress> progressList;
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AnalyticsEvent> analyticsEvents;

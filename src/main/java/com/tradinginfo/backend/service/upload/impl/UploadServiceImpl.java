@@ -1,8 +1,9 @@
-package com.tradinginfo.backend.service;
+package com.tradinginfo.backend.service.upload.impl;
 
 import com.tradinginfo.backend.entity.Lesson;
 import com.tradinginfo.backend.repository.LessonRepository;
-import com.tradinginfo.backend.service.TelegramBotService;
+import com.tradinginfo.backend.service.telegram.TelegramBotConfigService;
+import com.tradinginfo.backend.service.upload.UploadService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.commonmark.node.Node;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,13 +24,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -39,10 +35,10 @@ import java.util.zip.ZipInputStream;
 @RequiredArgsConstructor
 @Slf4j
 @Transactional
-public class UploadService {
+public class UploadServiceImpl implements UploadService {
 
     private final LessonRepository lessonRepository;
-    private final Optional<TelegramBotService> telegramBotService;
+    private final Optional<TelegramBotConfigService> telegramBotService;
 
     @Value("${upload.path}")
     private String uploadPath;
@@ -50,10 +46,11 @@ public class UploadService {
     private final Parser parser = Parser.builder().build();
     private final HtmlRenderer renderer = HtmlRenderer.builder().build();
 
+    @Override
     public Map<String, Object> uploadLessons(MultipartFile file, String targetFolder, Long telegramId) {
-        Map<String, Object> result = new HashMap<String, Object>();
-        List<String> uploadedFiles = new ArrayList<String>();
-        List<String> errors = new ArrayList<String>();
+        Map<String, Object> result = new HashMap<>();
+        List<String> uploadedFiles = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
 
         try {
             Path tempDir = Files.createTempDirectory("upload_");
@@ -107,6 +104,189 @@ public class UploadService {
         }
 
         return result;
+    }
+
+    @Override
+    public Map<String, Object> uploadSingleLesson(MultipartFile file, String targetFolder, Long telegramId) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            String originalFilename = Optional.ofNullable(file.getOriginalFilename())
+                    .orElseThrow(() -> new IllegalArgumentException("File name is required"));
+
+            // Handle ZIP files by redirecting to uploadLessons method
+            if (originalFilename.endsWith(".zip")) {
+                log.info("ZIP file detected in single upload, redirecting to bulk upload: {}", originalFilename);
+                return uploadLessons(file, targetFolder, telegramId);
+            }
+
+            if (!originalFilename.endsWith(".md")) {
+                result.put("success", false);
+                result.put("error", "Only Markdown (.md) files are allowed");
+                return result;
+            }
+
+            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+            String lessonPath = Optional.ofNullable(targetFolder)
+                    .map(folder -> folder + "/" + originalFilename)
+                    .orElse(originalFilename);
+
+            saveLessonToDatabase(lessonPath, content, targetFolder);
+
+            result.put("success", true);
+            result.put("message", "Lesson uploaded successfully: " + originalFilename);
+            result.put("fileName", originalFilename);
+
+            log.info("Uploaded single lesson: {}", originalFilename);
+            // sendTelegramNotificationForSingleLessonUpload(originalFilename, targetFolder);
+
+        } catch (IOException e) {
+            log.error("Failed to upload single lesson due to IO error", e);
+            result.put("success", false);
+            result.put("error", "File processing error");
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid file upload request", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error during single lesson upload", e);
+            result.put("success", false);
+            result.put("error", "Unexpected error occurred");
+        }
+
+        return result;
+    }
+
+    @Override
+    public void deleteLessonsFolder(String folder, Long telegramId) {
+        List<Lesson> lessons = lessonRepository.findByParentFolder(folder);
+
+        deletePhysicalFolderSafely(folder);
+        lessonRepository.deleteAll(lessons);
+        log.info("Deleted {} lessons from folder: {}", lessons.size(), folder);
+
+        // sendTelegramNotificationForFolderDeletion(folder, lessons.size());
+    }
+
+    @Override
+    public void deleteSingleLesson(String lessonPath, Long telegramId) {
+        Lesson lesson = lessonRepository.findByPath(lessonPath)
+                .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + lessonPath));
+
+        deletePhysicalFileSafely(lessonPath);
+        lessonRepository.delete(lesson);
+        log.info("Deleted single lesson: {}", lessonPath);
+
+    }
+
+    @Override
+    public void createFolder(String folderName, Long telegramId) {
+        createFolder(folderName, telegramId, false);
+    }
+
+    @Override
+    public void createFolder(String folderName, Long telegramId, Boolean subscriptionRequired) {
+        if (folderName == null || folderName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Folder name cannot be empty");
+        }
+
+        String cleanFolderName = folderName.trim();
+
+        // Check if folder already exists as a Lesson entity
+        Optional<Lesson> existingFolder = lessonRepository.findByPath(cleanFolderName);
+        if (existingFolder.isPresent()) {
+            throw new IllegalArgumentException("Folder already exists: " + cleanFolderName);
+        }
+
+        // Create physical folder in uploads directory
+        try {
+            Path folderPath = Paths.get(uploadPath, cleanFolderName);
+            if (!Files.exists(folderPath)) {
+                Files.createDirectories(folderPath);
+                log.info("📁 Physical folder created: {}", folderPath);
+            }
+        } catch (IOException e) {
+            log.error("Failed to create physical folder: {}", cleanFolderName, e);
+            throw new RuntimeException("Failed to create physical folder: " + e.getMessage());
+        }
+
+        // Create folder as a Lesson entity
+        Lesson folderLesson = new Lesson();
+        folderLesson.setPath(cleanFolderName);
+        folderLesson.setTitle(cleanFolderName);
+        folderLesson.setContent("");
+        folderLesson.setHtmlContent("");
+        folderLesson.setIsFolder(true);
+        folderLesson.setSubscriptionRequired(subscriptionRequired != null ? subscriptionRequired : false);
+        folderLesson.setParentFolder(null);
+        folderLesson.setWordCount(0);
+
+        lessonRepository.save(folderLesson);
+
+        log.info("✅ Folder created: {} with subscription required: {}", cleanFolderName, subscriptionRequired);
+    }
+
+    @Override
+    public void updateFolderSubscription(String folderPath, Boolean subscriptionRequired) {
+        if (folderPath == null || folderPath.trim().isEmpty()) {
+            throw new IllegalArgumentException("Folder path cannot be empty");
+        }
+
+        Optional<Lesson> folder = lessonRepository.findByPath(folderPath);
+        if (folder.isEmpty() || !Boolean.TRUE.equals(folder.get().getIsFolder())) {
+            throw new IllegalArgumentException("Folder not found: " + folderPath);
+        }
+
+        Lesson folderLesson = folder.get();
+        folderLesson.setSubscriptionRequired(subscriptionRequired != null ? subscriptionRequired : false);
+        lessonRepository.save(folderLesson);
+
+        log.info("✅ Updated folder subscription: {} to {}", folderPath, subscriptionRequired);
+    }
+
+    @Override
+    public Map<String, Object> getFileTreeForAdmin() {
+        try {
+            List<Lesson> allLessons = lessonRepository.findAll();
+            List<Map<String, Object>> fileTree = new ArrayList<>();
+
+            // Group lessons by folder
+            Map<String, List<Lesson>> lessonsByFolder = allLessons.stream()
+                    .filter(lesson -> lesson.getParentFolder() != null)
+                    .collect(java.util.stream.Collectors.groupingBy(Lesson::getParentFolder));
+
+            // Create folder structure for admin panel
+            for (Map.Entry<String, List<Lesson>> folderEntry : lessonsByFolder.entrySet()) {
+                String folderName = folderEntry.getKey();
+                List<Lesson> lessons = folderEntry.getValue();
+
+                Map<String, Object> folder = new HashMap<>();
+                folder.put("id", "folder_" + Math.abs(folderName.hashCode()));
+                folder.put("name", folderName);
+                folder.put("type", "folder");
+                folder.put("path", folderName);
+
+                List<Map<String, Object>> children = new ArrayList<>();
+                for (Lesson lesson : lessons) {
+                    Map<String, Object> file = new HashMap<>();
+                    // Only use basic data types, avoid Entity serialization issues
+                    file.put("id", "file_" + lesson.getId());
+                    file.put("name", lesson.getTitle() != null ? lesson.getTitle() : "Unnamed");
+                    file.put("type", "file");
+                    file.put("path", lesson.getPath() != null ? lesson.getPath() : "");
+                    children.add(file);
+                }
+                folder.put("children", children);
+                fileTree.add(folder);
+            }
+
+            log.info("✅ Generated file tree with {} folders", fileTree.size());
+            return Map.of("structure", fileTree);
+
+        } catch (Exception e) {
+            log.error("❌ Error generating file tree for admin", e);
+            return Map.of("structure", new ArrayList<>(), "error", "Failed to load file tree");
+        }
     }
 
     private void saveLessonToDatabase(String lessonPath, String content, String targetFolder) {
@@ -229,77 +409,6 @@ public class UploadService {
                 .forEach(File::delete);
     }
 
-    public Map<String, Object> uploadSingleLesson(MultipartFile file, String targetFolder, Long telegramId) {
-        Map<String, Object> result = new HashMap<String, Object>();
-
-        try {
-            String originalFilename = Optional.ofNullable(file.getOriginalFilename())
-                    .orElseThrow(() -> new IllegalArgumentException("File name is required"));
-
-            // Handle ZIP files by redirecting to uploadLessons method
-            if (originalFilename.endsWith(".zip")) {
-                log.info("ZIP file detected in single upload, redirecting to bulk upload: {}", originalFilename);
-                return uploadLessons(file, targetFolder, telegramId);
-            }
-
-            if (!originalFilename.endsWith(".md")) {
-                result.put("success", false);
-                result.put("error", "Only Markdown (.md) files are allowed");
-                return result;
-            }
-
-            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
-            String lessonPath = Optional.ofNullable(targetFolder)
-                    .map(folder -> folder + "/" + originalFilename)
-                    .orElse(originalFilename);
-
-            saveLessonToDatabase(lessonPath, content, targetFolder);
-
-            result.put("success", true);
-            result.put("message", "Lesson uploaded successfully: " + originalFilename);
-            result.put("fileName", originalFilename);
-
-            log.info("Uploaded single lesson: {}", originalFilename);
-            // sendTelegramNotificationForSingleLessonUpload(originalFilename, targetFolder);
-
-        } catch (IOException e) {
-            log.error("Failed to upload single lesson due to IO error", e);
-            result.put("success", false);
-            result.put("error", "File processing error");
-        } catch (IllegalArgumentException e) {
-            log.error("Invalid file upload request", e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
-        } catch (Exception e) {
-            log.error("Unexpected error during single lesson upload", e);
-            result.put("success", false);
-            result.put("error", "Unexpected error occurred");
-        }
-
-        return result;
-    }
-
-    public void deleteLessonsFolder(String folder, Long telegramId) {
-        List<Lesson> lessons = lessonRepository.findByParentFolder(folder);
-
-        deletePhysicalFolderSafely(folder);
-        lessonRepository.deleteAll(lessons);
-        log.info("Deleted {} lessons from folder: {}", lessons.size(), folder);
-
-        // sendTelegramNotificationForFolderDeletion(folder, lessons.size());
-    }
-
-    public void deleteSingleLesson(String lessonPath, Long telegramId) {
-        Lesson lesson = lessonRepository.findByPath(lessonPath)
-                .orElseThrow(() -> new IllegalArgumentException("Lesson not found: " + lessonPath));
-
-        deletePhysicalFileSafely(lessonPath);
-        lessonRepository.delete(lesson);
-        log.info("Deleted single lesson: {}", lessonPath);
-
-        // sendTelegramNotificationForLessonDeletion(lessonPath, lesson.getTitle());
-    }
-
     private void processMarkdownFile(Path mdFile, String targetFolder,
                                      List<String> uploadedFiles, List<String> errors) {
         try {
@@ -402,113 +511,6 @@ public class UploadService {
         if (Files.exists(rootFolderPath)) {
             deleteDirectory(rootFolderPath);
             log.info("🗑️ Deleted physical folder from root: {}", rootFolderPath);
-        }
-    }
-
-
-    public void createFolder(String folderName, Long telegramId) {
-        createFolder(folderName, telegramId, false);
-    }
-
-    public void createFolder(String folderName, Long telegramId, Boolean subscriptionRequired) {
-        if (folderName == null || folderName.trim().isEmpty()) {
-            throw new IllegalArgumentException("Folder name cannot be empty");
-        }
-
-        String cleanFolderName = folderName.trim();
-
-        // Check if folder already exists as a Lesson entity
-        Optional<Lesson> existingFolder = lessonRepository.findByPath(cleanFolderName);
-        if (existingFolder.isPresent()) {
-            throw new IllegalArgumentException("Folder already exists: " + cleanFolderName);
-        }
-
-        // Create physical folder in uploads directory
-        try {
-            Path folderPath = Paths.get(uploadPath, cleanFolderName);
-            if (!Files.exists(folderPath)) {
-                Files.createDirectories(folderPath);
-                log.info("📁 Physical folder created: {}", folderPath);
-            }
-        } catch (IOException e) {
-            log.error("Failed to create physical folder: {}", cleanFolderName, e);
-            throw new RuntimeException("Failed to create physical folder: " + e.getMessage());
-        }
-
-        // Create folder as a Lesson entity
-        Lesson folderLesson = new Lesson();
-        folderLesson.setPath(cleanFolderName);
-        folderLesson.setTitle(cleanFolderName);
-        folderLesson.setContent("");
-        folderLesson.setHtmlContent("");
-        folderLesson.setIsFolder(true);
-        folderLesson.setSubscriptionRequired(subscriptionRequired != null ? subscriptionRequired : false);
-        folderLesson.setParentFolder(null);
-        folderLesson.setWordCount(0);
-
-        lessonRepository.save(folderLesson);
-
-        log.info("✅ Folder created: {} with subscription required: {}", cleanFolderName, subscriptionRequired);
-    }
-
-    public void updateFolderSubscription(String folderPath, Boolean subscriptionRequired) {
-        if (folderPath == null || folderPath.trim().isEmpty()) {
-            throw new IllegalArgumentException("Folder path cannot be empty");
-        }
-
-        Optional<Lesson> folder = lessonRepository.findByPath(folderPath);
-        if (folder.isEmpty() || !Boolean.TRUE.equals(folder.get().getIsFolder())) {
-            throw new IllegalArgumentException("Folder not found: " + folderPath);
-        }
-
-        Lesson folderLesson = folder.get();
-        folderLesson.setSubscriptionRequired(subscriptionRequired != null ? subscriptionRequired : false);
-        lessonRepository.save(folderLesson);
-
-        log.info("✅ Updated folder subscription: {} to {}", folderPath, subscriptionRequired);
-    }
-
-    public Map<String, Object> getFileTreeForAdmin() {
-        try {
-            List<Lesson> allLessons = lessonRepository.findAll();
-            List<Map<String, Object>> fileTree = new ArrayList<>();
-
-            // Group lessons by folder
-            Map<String, List<Lesson>> lessonsByFolder = allLessons.stream()
-                    .filter(lesson -> lesson.getParentFolder() != null)
-                    .collect(java.util.stream.Collectors.groupingBy(Lesson::getParentFolder));
-
-            // Create folder structure for admin panel
-            for (Map.Entry<String, List<Lesson>> folderEntry : lessonsByFolder.entrySet()) {
-                String folderName = folderEntry.getKey();
-                List<Lesson> lessons = folderEntry.getValue();
-
-                Map<String, Object> folder = new HashMap<>();
-                folder.put("id", "folder_" + Math.abs(folderName.hashCode()));
-                folder.put("name", folderName);
-                folder.put("type", "folder");
-                folder.put("path", folderName);
-
-                List<Map<String, Object>> children = new ArrayList<>();
-                for (Lesson lesson : lessons) {
-                    Map<String, Object> file = new HashMap<>();
-                    // Only use basic data types, avoid Entity serialization issues
-                    file.put("id", "file_" + lesson.getId());
-                    file.put("name", lesson.getTitle() != null ? lesson.getTitle() : "Unnamed");
-                    file.put("type", "file");
-                    file.put("path", lesson.getPath() != null ? lesson.getPath() : "");
-                    children.add(file);
-                }
-                folder.put("children", children);
-                fileTree.add(folder);
-            }
-
-            log.info("✅ Generated file tree with {} folders", fileTree.size());
-            return Map.of("structure", fileTree);
-
-        } catch (Exception e) {
-            log.error("❌ Error generating file tree for admin", e);
-            return Map.of("structure", new ArrayList<>(), "error", "Failed to load file tree");
         }
     }
 }

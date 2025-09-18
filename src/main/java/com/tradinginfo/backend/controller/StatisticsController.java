@@ -1,7 +1,7 @@
 package com.tradinginfo.backend.controller;
 
 import com.tradinginfo.backend.dto.UserStatisticsDTO;
-import com.tradinginfo.backend.service.StatisticsService;
+import com.tradinginfo.backend.service.analytics.StatisticsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;

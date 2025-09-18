@@ -12,11 +12,23 @@ import java.util.Optional;
 public interface LessonRepository extends JpaRepository<Lesson, Long> {
     Optional<Lesson> findByPath(String path);
     List<Lesson> findByParentFolder(String parentFolder);
-    List<Lesson> findByParentFolderOrderByLessonNumber(String parentFolder);
 
     @Query("SELECT l FROM Lesson l WHERE LOWER(l.title) LIKE LOWER(CONCAT('%', :query, '%')) OR LOWER(l.content) LIKE LOWER(CONCAT('%', :query, '%'))")
     List<Lesson> searchLessons(@Param("query") String query);
 
-    boolean existsByPath(String path);
-    void deleteByPath(String path);
+    // NEW OPTIMIZED METHODS - Safe additions for performance improvement
+    @Query("SELECT DISTINCT l.parentFolder FROM Lesson l WHERE l.parentFolder IS NOT NULL AND l.parentFolder != ''")
+    List<String> findDistinctParentFoldersOptimized();
+
+    @Query("SELECT l.path FROM Lesson l WHERE LOWER(l.title) LIKE LOWER(CONCAT('%', :name, '%'))")
+    Optional<String> findPathByTitleContainingOptimized(@Param("name") String name);
+
+    @Query("SELECT l FROM Lesson l WHERE l.parentFolder = :folder ORDER BY l.lessonNumber")
+    List<Lesson> findByParentFolderOrderByLessonNumberOptimized(@Param("folder") String folder);
+
+    @Query("SELECT COUNT(l) FROM Lesson l WHERE l.parentFolder = :folder")
+    long countByParentFolderOptimized(@Param("folder") String folder);
+
+    @Query("SELECT l FROM Lesson l WHERE l.isFolder = true")
+    List<Lesson> findAllFoldersOptimized();
 }

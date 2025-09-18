@@ -1,15 +1,15 @@
 package com.tradinginfo.backend.controller;
 
-import com.tradinginfo.backend.service.UploadService;
-import com.tradinginfo.backend.service.TelegramAuthService;
-import com.tradinginfo.backend.service.RedisCacheService;
+import com.tradinginfo.backend.service.upload.UploadService;
+import com.tradinginfo.backend.service.telegram.TelegramUserAuthService;
+// import com.tradinginfo.backend.service.infrastructure.RedisCacheService; // REMOVED
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.util.Map;
-import java.util.Optional;
+// import java.util.Optional; // No longer needed
 
 @RestController
 @RequestMapping("/upload")
@@ -19,8 +19,8 @@ import java.util.Optional;
 public class UploadController {
 
     private final UploadService uploadService;
-    private final TelegramAuthService telegramAuthService;
-    private final Optional<RedisCacheService> redisCacheService;
+    private final TelegramUserAuthService telegramAuthService;
+    // private final Optional<RedisCacheService> redisCacheService; // REMOVED
 
     @PostMapping("/lessons")
     public ResponseEntity<Map<String, Object>> uploadLessons(
@@ -51,10 +51,8 @@ public class UploadController {
 
         log.info("📤 Uploading single lesson file: {}", file.getOriginalFilename());
 
-        // Extract telegram user ID from initData
         Long telegramId = telegramAuthService.extractTelegramUserId(initData);
 
-        // Validate initData and check admin permissions
         if (!telegramAuthService.validateInitData(initData)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
         }
@@ -65,9 +63,8 @@ public class UploadController {
 
         Map<String, Object> result = uploadService.uploadSingleLesson(file, targetFolder, telegramId);
 
-        // Clear lesson cache after successful upload
         if ((Boolean) result.getOrDefault("success", false)) {
-            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+            // No cache clearing needed
         }
 
         return ResponseEntity.ok(result);
@@ -115,7 +112,7 @@ public class UploadController {
             uploadService.createFolder(folderName, telegramId, subscriptionRequired);
 
             // Clear lesson cache after folder creation
-            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+            // No cache clearing needed
 
             return ResponseEntity.ok(Map.of("message", "Folder created successfully: " + folderName));
         } catch (Exception e) {
@@ -143,7 +140,7 @@ public class UploadController {
             uploadService.createFolder(folderName, telegramId, subscriptionRequired);
 
             // Clear lesson cache after folder creation
-            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+            // No cache clearing needed
 
             return ResponseEntity.ok(Map.of("message", "Folder created successfully: " + folderName));
         } catch (Exception e) {
@@ -166,12 +163,7 @@ public class UploadController {
         }
 
         // Clear Redis cache
-        if (redisCacheService.isPresent()) {
-            redisCacheService.get().clearAllCache();
-            return ResponseEntity.ok(Map.of("message", "Cache cleared successfully"));
-        } else {
-            return ResponseEntity.ok(Map.of("message", "Redis not available, no cache to clear"));
-        }
+        return ResponseEntity.ok(Map.of("message", "Cache disabled - no cache to clear"));
     }
 
     @GetMapping("/admin/check")
@@ -212,7 +204,7 @@ public class UploadController {
             uploadService.deleteSingleLesson(lessonPath, telegramId);
 
             // Clear lesson cache after successful deletion
-            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+            // No cache clearing needed
 
             return ResponseEntity.ok(Map.of("message", "Lesson deleted successfully"));
         } catch (Exception e) {
@@ -238,10 +230,8 @@ public class UploadController {
 
         log.info("📁 Updating folder subscription: {} to {}", folderPath, subscriptionRequired);
 
-        // Extract telegram user ID from initData
         Long telegramId = telegramAuthService.extractTelegramUserId(initData);
 
-        // Validate initData and check admin permissions
         if (!telegramAuthService.validateInitData(initData)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid authentication data"));
         }
@@ -253,8 +243,7 @@ public class UploadController {
         try {
             uploadService.updateFolderSubscription(folderPath, subscriptionRequired);
 
-            // Clear lesson cache after updating folder
-            redisCacheService.ifPresent(RedisCacheService::clearLessonCache);
+            // No cache clearing needed
 
             return ResponseEntity.ok(Map.of("message", "Folder subscription updated successfully"));
         } catch (Exception e) {
@@ -270,17 +259,10 @@ public class UploadController {
         log.info("🧹 Clearing lesson cache");
         Long telegramId = telegramAuthService.extractTelegramUserId(initData);
 
-        // Validate admin permissions
         if (!telegramAuthService.isAdmin(telegramId)) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
 
-        // Clear Redis cache
-        if (redisCacheService.isPresent()) {
-            redisCacheService.get().clearAllCache();
-            return ResponseEntity.ok(Map.of("message", "Cache cleared successfully"));
-        } else {
-            return ResponseEntity.ok(Map.of("message", "Redis not available, no cache to clear"));
-        }
+        return ResponseEntity.ok(Map.of("message", "Cache disabled - no cache to clear"));
     }
 }
